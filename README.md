@@ -1,47 +1,85 @@
-# Amiga Citadel 1.0 (original version)
+# Citadel — Java / jMonkeyEngine port
 
-## Introduction
+A port of the 1995 Amiga game **Citadel** by Virtual Design, rebuilt in Java on
+[jMonkeyEngine](https://jmonkeyengine.org/). The original 68000 assembly sources and game data are
+included in `Code/` and `Data/` and are the reference the port is derived from.
 
-This is the original version of the 1995 Amiga game "Citadel" by Virtual Design.
+The original is a cell-based software renderer: a 64 × 64 grid of 1024-unit cells, walls drawn as
+textured trapezoids back to front from a precomputed visibility table, all integer arithmetic,
+output as chunky pixels and converted to five Amiga bitplanes. The port drops that rendering path
+entirely — jMonkeyEngine draws real 3D — and keeps what actually matters: the data formats and the
+game rules, taken from the assembly rather than reinvented.
 
-It contains the original code and data, although some of it is missing - for example the intro animations are not there any more. It also contains the editor which has been moved into a separate folder and slightly updated for the purpose of Citadel 1.3 "Remonstered". Note: this repo does not include the "Remonstered" engine version.
+![Citadel running in jMonkeyEngine](docs/screenshot.png)
 
-## System Requirements
+## Running it
 
-Minimum configuration: Any Amiga with a minimum of 0.5MB Chip + 0.5MB other (prefferably Fast) memory.
+Needs a JDK 21 toolchain. Gradle downloads jMonkeyEngine on first build.
 
-Suggested configuration: Amiga 1200 with 68020/14MHz or faster with minimum 0.5MB Chip and 1MB+ Fast memory. 
+```sh
+gradle :tools:convert     # convert the original data into build/assets
+gradle :game:run          # walk around LEVEL01A
+gradle :game:run --args=LEVEL05B
+```
 
-## Development environment
+Conversion has to run once before the game: the viewer loads its textures from `build/assets`,
+while level data is read straight out of the original `.MAP` files.
 
-After cloning the repo into e.g. DH0:/Citadel, add the following to your startup-sequence:
+**Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall
+you are facing.
 
-- assign >NIL: DATA: SYSTEM:Citadel/DATA/game
-- assign >NIL: CODE: SYSTEM:Citadel/CODE
-- assign >NIL: EDITOR: SYSTEM:Citadel/Editor
+## What works
 
+- All 28 levels and all 8 texture sets load and render: walls, sliding doors, floors, ceilings,
+  columns, items and both enemy species.
+- Movement and collision follow the original rules, not a physics engine: the 307-unit player
+  radius, clamp-after-move sliding, corner handling, blocking columns.
+- Doors open by themselves as you approach and shut behind you, one of each type at a time.
+- Wall switches run their command lists (open/close door, set/remove block, swap wall, item or
+  column), teleports work, reaching the exit cell ends the level.
+- Items are picked up with the original's rules and fill a working inventory: weapons, ammunition,
+  keycards, first aid, speed boost, vodka, warhead sections.
+- Enemies are simulated in the 24 × 24 cells around the player: they roam, close in, take line of
+  sight into account, and shoot.
 
-A system with minimum 1MB chip and 4 MB Fast memory is required. Can be a real Amiga or emulator-based.
+## What is missing
 
-The game can be assembled using AsmOne (v1.20 or newer). On starting it allocate a minimum of 500kb of Public or Fast memory for your workspace. The main file is in CODE/MAIN1/CytadelaHD_134.ss and the entry point is labeled 's'. 
+- Player weapons and projectiles (`Check_RMB`, `Anim_Objects`).
+- HUD proper, automap, compass, and the menu and inventory layer (`SERVER`).
+- Sound playback — the effects are converted to WAV but nothing plays them yet.
+- Intro and death sequences.
 
-### Running the game from AsmOne
+`PORTING.md` keeps an honest list of the known gaps.
 
-In order to run the main game engine from assembler:
-1. Navigate to the directory where you cloned this project and go to CODE/MAIN1/
-2. Load AsmOne (v1.20 or newer).
-3. Select 'p' and then '500' to allocate working memory.
-4. Load the main Citadel source code file 'CytadelaHD_134.ss' into the AsmOne editor (r CytadelaHD_134.ss)
-5. Press ESC to go into the actual assembler editor. Towards the top of the file find the BASE labels pointing to CHIP and FAST memoryto used, change them to where you have a free 0.5MB CHIP and 0.5MB FAST memory. This can be checked using SysInfo or a similar tool.
-6. Press ESC again to go to the AsmOne command window.
-7. Assemble (a), load externs (e) and run the game (j s).
+## Layout
 
-A similar procedure should be followego to assemble and run other parts of the game (such as the menu or the intro) although some data files might be not in the right locations or just missing - this needs sorting out.
+| module | contents | dependencies |
+|---|---|---|
+| `core` | data formats, level model, game rules | none |
+| `tools` | asset converter and inspectors | `core`, `java.desktop` |
+| `game` | jMonkeyEngine front end | `core`, jME 3.9 |
 
-## Copyright and License
-Copyright (C) 1995, 2022 Virtual Design
+`core` has no dependency on jMonkeyEngine or on `java.desktop`, so the whole rule set runs
+headless. `gradle :core:test` exercises it against the shipped maps, including a random walk of
+20 000 steps across five levels asserting the player never ends up on the far side of a shut door.
 
-This software is free to copy and use for non-commercial purposes under the terms of the GNU GPL-3.0 license. 
+## Documentation
 
-## Warranty
-This package comes with absolutely no warranty of any kind, either express or implied, statutory or otherwise. The entire risk as to use, results and performance of the package is assumed by you and if the package should prove to be defective, you assume the entire cost of all necessary servicing, repair or other remediation. Under no circumstances, can the authors be held responsible for any damage caused in any usual, special, or accidental way, also if the owner or a third party has been pointed at such possibilities of damage.
+- **[PORTING.md](PORTING.md)** — coordinate system, movement rules, where the port deliberately
+  departs from the original, and the current state.
+- **[tools/README.md](tools/README.md)** — every original data format, decoded, with the assembly
+  label that proves each claim.
+
+Two things were not written down anywhere and had to be worked out: `.VIR` graphics are stored
+column-major with a 65-byte stride, and the colour index is bit-reversed into bits 3..7 of each
+byte because the chunky-to-planar macro consumes bit 7 first. Cell values index the engine's
+sprite tables 1-based.
+
+## Credits and licence
+
+Citadel is Copyright © 1995, 2022 Virtual Design. Original code by Kane of Suspect.
+
+The original sources come from [pawelmat/Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel).
+
+This package is free to copy and use for non-commercial purposes under the terms of the
+**GNU GPL-3.0** licence; see [LICENSE](LICENSE). It comes with absolutely no warranty of any kind.

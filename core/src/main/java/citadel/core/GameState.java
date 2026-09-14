@@ -1,0 +1,810 @@
+package citadel.core;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * The playable state of one level: where the player is, which doors are moving, and what the
+ * triggers have changed. Pure Java with no renderer attached, so it can be driven from a test as
+ * easily as from jMonkeyEngine.
+ *
+ * Distances and angles keep the original engine's units. Positions are in world units with
+ * {@link Level#CELL_UNITS} per cell; the angle runs 0..511 for a full turn and the forward vector
+ * is {@code (cos a, sin a)} in (X, Y), which is what sv_rotate computes.
+ */
+public final class GameState {
+
+    /**
+     * min_distance, from the equate {@code [500 * 2^SHLeft / mc_maxHeigth] + 2} evaluated with
+     * 68000 integer division: 500 * 256 / 350 = 365, + 2.
+     */
+    public static final int MIN_DISTANCE = 367;
+    /** How close the player's centre may get to a wall, i.e. min_distance - 60 in sv_Border. */
+    public static final int PLAYER_RADIUS = MIN_DISTANCE - 60;
+    /** Half-width of the blocking box around a column, from the {@code cmpi #512-208} tests. */
+    public static final int COLUMN_HALF = 208;
+    /** Where the player is pushed back to after entering a column, from {@code #512+210}. */
+    public static final int COLUMN_PUSH = 210;
+
+    /** Walk speed per original frame, from sv_WalkSpeed. */
+    public static final int WALK_SPEED = 250;
+    /** Turn speed per original frame, from sv_RotSpeed. */
+    public static final int ROT_SPEED = 12;
+    /** The original runs on the PAL vertical blank. */
+    public static final float FRAMES_PER_SECOND = 50f;
+
+    /** Column values that block movement, per .br2_COLUMN2: 1, 2 and 4, plus 18 (the barrel). */
+    private static boolean blockingColumn(int v) {
+        return v == 18 || (v != 0 && v < 5 && v != 3);
+    }
+
+    /** Column value 4 is a teleport pad rather than an obstacle. */
+    public static final int COLUMN_TELEPORT = 4;
+
+    public final Level level;
+
+    public int posX;
+    public int posY;
+    /** 0..511, a full turn. 0 faces +X (east), 128 faces +Y (north). */
+    public int angle;
+
+    private int lastInX = 512;
+    private int lastInY = 512;
+    private boolean levelComplete;
+    private boolean geometryDirty;
+
+    private final DoorSlot[] doors = {new DoorSlot(1), new DoorSlot(2)};
+    private final List<String> log = new ArrayList<String>();
+
+    public final Inventory inventory = new Inventory();
+    private final List<Enemy> enemies = new ArrayList<Enemy>();
+    private final java.util.Random rnd = new java.util.Random(0x0C17ADE1L);
+    /** Accumulates fractional engine frames so the simulation ticks at the original rate. */
+    private float frameAccumulator;
+
+    public GameState(Level level) {
+        this.level = level;
+        this.posX = level.spawnCellX * Level.CELL_UNITS + Level.CELL_UNITS / 2;
+        this.posY = level.spawnCellY * Level.CELL_UNITS + Level.CELL_UNITS / 2;
+        this.angle = level.spawnFacing & 511;
+        for (Level.EnemySpawn spawn : level.enemySpawns()) {
+            enemies.add(new Enemy(spawn));
+        }
+    }
+
+    public List<Enemy> enemies() {
+        return enemies;
+    }
+
+    public int cellX() {
+        return (posX / Level.CELL_UNITS) & 63;
+    }
+
+    public int cellY() {
+        return (posY / Level.CELL_UNITS) & 63;
+    }
+
+    public boolean isLevelComplete() {
+        return levelComplete;
+    }
+
+    /**
+     * True once a trigger has changed the level's shape (a wall, item or column swapped out), so
+     * the renderer knows it has to rebuild. Door animation does not set this: doors move every
+     * frame and are animated in place instead.
+     */
+    public boolean consumeGeometryDirty() {
+        boolean was = geometryDirty;
+        geometryDirty = false;
+        return was;
+    }
+
+    /** Messages the last update produced, for the HUD or for debugging. Cleared by the caller. */
+    public List<String> drainLog() {
+        List<String> out = new ArrayList<String>(log);
+        log.clear();
+        return out;
+    }
+
+    public float angleRadians() {
+        return (float) (angle * 2.0 * Math.PI / 512.0);
+    }
+
+    // --------------------------------------------------------------- update
+
+    /**
+     * Advances the world.
+     *
+     * @param forward -1..1, scaled by the original walk speed
+     * @param strafe  -1..1
+     * @param turn    -1..1, scaled by the original turn speed
+     * @param dt      seconds since the last call
+     */
+    public void update(float forward, float strafe, float turn, float dt) {
+        float frames = dt * FRAMES_PER_SECOND;
+        if (turn != 0f) {
+            angle = (angle - Math.round(turn * ROT_SPEED * frames)) & 511;
+        }
+
+        if (forward != 0f || strafe != 0f) {
+            // The original moves along a single vector whose length is capped by sv_WalkSpeed, so
+            // clamp the combined input rather than letting a diagonal run 41% faster.
+            float mag = (float) Math.sqrt(forward * forward + strafe * strafe);
+            if (mag > 1f) {
+                forward /= mag;
+                strafe /= mag;
+            }
+            double a = angleRadians();
+            double cos = Math.cos(a), sin = Math.sin(a);
+            // sv_rotate: x' = strafe*sin + forward*cos, y' = forward*sin - strafe*cos
+            double dx = (strafe * sin + forward * cos) * WALK_SPEED * frames;
+            double dy = (forward * sin - strafe * cos) * WALK_SPEED * frames;
+            step(dx, dy);
+        }
+
+        serveDoors();
+        takeItems();
+        checkExit();
+
+        // Enemies, counters and timers run on the original's frame clock, not on the renderer's.
+        frameAccumulator += frames;
+        int ticks = Math.min(4, (int) frameAccumulator);
+        frameAccumulator -= ticks;
+        for (int i = 0; i < ticks; i++) {
+            inventory.tick();
+            moveEnemies();
+        }
+    }
+
+    /**
+     * Take_Items: an item is collected when the player is inside a 220 unit box around the centre
+     * of its cell. The engine clears only the low six bits, keeping the block flag.
+     */
+    private void takeItems() {
+        int cx = cellX(), cy = cellY();
+        int item = level.item(cx, cy);
+        if (item == 0) {
+            return;
+        }
+        int inX = posX % Level.CELL_UNITS;
+        int inY = posY % Level.CELL_UNITS;
+        if (inX < 512 - 220 || inX > 512 + 220 || inY < 512 - 220 || inY > 512 + 220) {
+            return;
+        }
+        String what = inventory.take(item);
+        if (what == null) {
+            return;
+        }
+        level.setItem(cx, cy, 0);
+        geometryDirty = true;
+        log.add(what);
+    }
+
+    /**
+     * Applies a movement, split so no single sub-step can cross more than one cell boundary.
+     * The original never needs this because it moves at most 250 units per frame against a
+     * 307 unit radius, but a variable frame rate can ask for much more.
+     */
+    private void step(double dx, double dy) {
+        double len = Math.max(Math.abs(dx), Math.abs(dy));
+        int steps = Math.max(1, (int) Math.ceil(len / 200.0));
+        for (int i = 0; i < steps; i++) {
+            int fromX = cellX(), fromY = cellY();
+            posX = clampCoord(posX + (int) Math.round(dx / steps));
+            posY = clampCoord(posY + (int) Math.round(dy / steps));
+            blockCrossing(fromX, fromY);
+            collide();
+        }
+    }
+
+    /**
+     * Keeps the player inside the cell the sub-step started in whenever the face they would cross
+     * is shut.
+     *
+     * The original gets this for free: it moves at most 250 units per frame against a 307 unit
+     * clamp, so it can never reach a boundary that is closed. It can still be straddling a doorway
+     * when that door shuts, though, and then the next step slips through before the clamp applies.
+     */
+    private void blockCrossing(int fromX, int fromY) {
+        int toX = cellX();
+        if (toX != fromX) {
+            int dir = (toX > fromX) ? Level.EAST_DIR : Level.WEST_DIR;
+            if (!level.isPassable(fromX, fromY, dir)) {
+                posX = fromX * Level.CELL_UNITS
+                        + (dir == Level.EAST_DIR ? Level.CELL_UNITS - 1 : 0);
+            }
+        }
+        int toY = cellY();
+        if (toY != fromY) {
+            int dir = (toY > fromY) ? Level.NORTH_DIR : Level.SOUTH_DIR;
+            if (!level.isPassable(fromX, fromY, dir)) {
+                posY = fromY * Level.CELL_UNITS
+                        + (dir == Level.NORTH_DIR ? Level.CELL_UNITS - 1 : 0);
+            }
+        }
+    }
+
+    private static int clampCoord(int v) {
+        return Math.max(0, Math.min(64 * Level.CELL_UNITS - 1, v));
+    }
+
+    // ------------------------------------------------------------ collision
+
+    /**
+     * Reimplements sv_Border: clamp the in-cell position away from any face that is not passable,
+     * then push out of a blocking column, then fix up the diagonals.
+     *
+     * Clamping after the fact is what gives the original its sliding-along-walls feel, so it is
+     * reproduced rather than replaced with a swept test.
+     */
+    private void collide() {
+        int cx = cellX(), cy = cellY();
+        int inX = posX % Level.CELL_UNITS;
+        int inY = posY % Level.CELL_UNITS;
+        final int r = PLAYER_RADIUS;
+        final int far = Level.CELL_UNITS - r;
+
+        if (inX < r && !level.isPassable(cx, cy, Level.WEST_DIR)) {
+            inX = r;
+        } else if (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR)) {
+            inX = far;
+        }
+        if (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR)) {
+            inY = r;
+        } else if (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR)) {
+            inY = far;
+        }
+
+        int col = level.column(cx, cy);
+        if (col != 0 && insideColumnBox(inX, inY)) {
+            if (col == COLUMN_TELEPORT) {
+                if (teleportFrom(cx, cy)) {
+                    return;
+                }
+            } else if (blockingColumn(col)) {
+                // Push back along whichever axis the player came from, as br2_c1..c3 do.
+                if (lastInX < 512 - 209) {
+                    inX = 512 - COLUMN_PUSH;
+                } else if (lastInX > 512 + 209) {
+                    inX = 512 + COLUMN_PUSH;
+                } else if (lastInY < 512 - 209) {
+                    inY = 512 - COLUMN_PUSH;
+                } else if (lastInY > 512 + 209) {
+                    inY = 512 + COLUMN_PUSH;
+                }
+            }
+        }
+
+        inX = fixDiagonal(cx, cy, inX, inY, true);
+        inY = fixDiagonal(cx, cy, inX, inY, false);
+
+        posX = cx * Level.CELL_UNITS + inX;
+        posY = cy * Level.CELL_UNITS + inY;
+        lastInX = inX;
+        lastInY = inY;
+    }
+
+    private static boolean insideColumnBox(int inX, int inY) {
+        return inX >= 512 - COLUMN_HALF && inX <= 512 + COLUMN_HALF
+                && inY >= 512 - COLUMN_HALF && inY <= 512 + COLUMN_HALF;
+    }
+
+    /**
+     * Stops the player cutting a corner diagonally when both cells beyond the corner are walled
+     * off, which is what br2_UP and br2_DOWN do. Pushes back along the axis with less penetration.
+     */
+    private int fixDiagonal(int cx, int cy, int inX, int inY, boolean wantX) {
+        final int r = PLAYER_RADIUS;
+        final int far = Level.CELL_UNITS - r;
+        int dirX = (inX < r) ? Level.WEST_DIR : (inX > far) ? Level.EAST_DIR : -1;
+        int dirY = (inY < r) ? Level.SOUTH_DIR : (inY > far) ? Level.NORTH_DIR : -1;
+        if (dirX < 0 || dirY < 0) {
+            return wantX ? inX : inY;
+        }
+        int nx = cx + Level.DX[dirX], ny = cy + Level.DY[dirX];
+        int mx = cx + Level.DX[dirY], my = cy + Level.DY[dirY];
+        boolean blocked =
+                (Level.inside(nx, ny) && !level.isPassable(nx, ny, dirY))
+                || (Level.inside(mx, my) && !level.isPassable(mx, my, dirX));
+        if (!blocked) {
+            return wantX ? inX : inY;
+        }
+        int penX = (dirX == Level.WEST_DIR) ? (r - inX) : (inX - far);
+        int penY = (dirY == Level.SOUTH_DIR) ? (r - inY) : (inY - far);
+        if (penY >= penX) {
+            return wantX ? inX : ((dirY == Level.SOUTH_DIR) ? r : far);
+        }
+        return wantX ? ((dirX == Level.WEST_DIR) ? r : far) : inY;
+    }
+
+    // ------------------------------------------------------------ teleports
+
+    private boolean teleportFrom(int cx, int cy) {
+        for (Level.Teleport t : level.teleports()) {
+            if (t.fromX == cx && t.fromY == cy) {
+                posX = t.toX * Level.CELL_UNITS + Level.CELL_UNITS / 2;
+                posY = t.toY * Level.CELL_UNITS + Level.CELL_UNITS / 2;
+                lastInX = 512;
+                lastInY = 512;
+                log.add("teleported to (" + t.toX + "," + t.toY + ")");
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void checkExit() {
+        if (!levelComplete && cellX() == level.exitCellX && cellY() == level.exitCellY) {
+            levelComplete = true;
+            log.add("level complete");
+        }
+    }
+
+    // ---------------------------------------------------------------- doors
+
+    /**
+     * One of the two door channels the engine keeps, sv_DoorFlag1 and sv_DoorFlag2. Only one door
+     * of each type can be moving at a time, which is why the original stores a single slot.
+     */
+    public static final class DoorSlot {
+        /** 1 or 2: which family of door values this channel drives. */
+        final int type;
+        /** Cell values for this type: closed, open, animating. */
+        final int closed;
+        final int open;
+        final int animating;
+
+        boolean inUse;
+        boolean opening;
+        /** 5 is fully closed, 0 is fully open, matching the counter in OpenCloseDoors. */
+        int counter = 5;
+        int cellX, cellY, dir;
+        boolean hasBack;
+        int backX, backY, backDir;
+
+        DoorSlot(int type) {
+            this.type = type;
+            this.closed = (type == 1) ? 30 : 36;
+            this.open = (type == 1) ? 32 : 38;
+            this.animating = (type == 1) ? 34 : 40;
+        }
+
+        public boolean isActive() {
+            return inUse;
+        }
+
+        public int cellX() {
+            return cellX;
+        }
+
+        public int cellY() {
+            return cellY;
+        }
+
+        public int dir() {
+            return dir;
+        }
+
+        /** 0 shut, 1 fully open. */
+        public float openFraction() {
+            return (5 - counter) / 5f;
+        }
+    }
+
+    public DoorSlot[] doorSlots() {
+        return doors;
+    }
+
+    /**
+     * br_Chk_OPEN plus OpenCloseDoors: any door of the right family on a face of the cell the
+     * player stands in opens by itself, unless that cell carries the block flag. When the player
+     * leaves, the same door closes again.
+     */
+    private void serveDoors() {
+        int cx = cellX(), cy = cellY();
+        for (DoorSlot slot : doors) {
+            boolean wantOpen = false;
+            if (!level.isBlocked(cx, cy)) {
+                for (int d = 0; d < 4; d++) {
+                    int v = level.wallValue(cx, cy, d) & 0xff;
+                    if (v >= slot.closed && v < slot.closed + 6) {
+                        if (!slot.inUse || slot.cellX != cx || slot.cellY != cy || slot.dir != d) {
+                            claim(slot, cx, cy, d);
+                        }
+                        wantOpen = true;
+                        break;
+                    }
+                }
+            }
+            slot.opening = wantOpen;
+            animate(slot);
+        }
+    }
+
+    private void claim(DoorSlot slot, int cx, int cy, int d) {
+        if (slot.inUse && slot.counter != 5 && slot.counter != 0) {
+            return; // leave a door that is still mid-animation alone
+        }
+        slot.inUse = true;
+        slot.cellX = cx;
+        slot.cellY = cy;
+        slot.dir = d;
+        int nx = cx + Level.DX[d], ny = cy + Level.DY[d];
+        slot.hasBack = Level.inside(nx, ny);
+        if (slot.hasBack) {
+            slot.backX = nx;
+            slot.backY = ny;
+            slot.backDir = Level.OPPOSITE[d];
+        }
+        int v = level.wallValue(cx, cy, d) & 0xff;
+        slot.counter = (v == slot.open) ? 0 : 5;
+    }
+
+    private void animate(DoorSlot slot) {
+        if (!slot.inUse) {
+            return;
+        }
+        if (slot.opening) {
+            if (slot.counter > 0) {
+                slot.counter--;
+                writeDoor(slot, slot.counter == 0 ? slot.open : slot.animating);
+            }
+        } else {
+            if (slot.counter < 5) {
+                slot.counter++;
+                writeDoor(slot, slot.counter == 5 ? slot.closed : slot.animating);
+            } else {
+                writeDoor(slot, slot.closed);
+                slot.inUse = false;
+            }
+        }
+    }
+
+    private void writeDoor(DoorSlot slot, int value) {
+        setFace(slot.cellX, slot.cellY, slot.dir, value);
+        if (slot.hasBack) {
+            setFace(slot.backX, slot.backY, slot.backDir, value);
+        }
+    }
+
+    /** Writes a cell value while keeping the mirror bit the map author chose for that face. */
+    private void setFace(int x, int y, int dir, int value) {
+        int mirror = level.wallValue(x, y, dir) & 1;
+        level.setWallValue(x, y, dir, value | mirror);
+    }
+
+    // -------------------------------------------------------------- enemies
+
+    /**
+     * Move_Enemy. The original only simulates the 24 x 24 cells around the player, which is both
+     * a performance measure and a gameplay one: enemies further away stand still.
+     */
+    private void moveEnemies() {
+        int px = cellX(), py = cellY();
+        for (Enemy e : enemies) {
+            if (e.isDead()) {
+                continue;
+            }
+            if (Math.abs(e.cellX() - px) > 12 || Math.abs(e.cellY() - py) > 12) {
+                continue;
+            }
+            switch (e.state) {
+                case Enemy.HIT:
+                    if (--e.counter <= 0) {
+                        e.state = Enemy.WALKING;
+                    }
+                    break;
+                case Enemy.BURNING:
+                    if (--e.energy <= 0) {
+                        kill(e);
+                    }
+                    break;
+                case Enemy.SHOOTING:
+                    // me_shootON adds 4 a frame and fires at 68, so eight frames of wind-up.
+                    e.counter += 4;
+                    if (e.counter >= 68) {
+                        fire(e);
+                        e.state = Enemy.WALKING;
+                        e.counter = 0;
+                    }
+                    break;
+                default:
+                    think(e);
+                    break;
+            }
+        }
+    }
+
+    /**
+     * me_walk: roll against distance plus the species' stats to decide between closing in and
+     * standing off, then shoot if there is a clear line.
+     */
+    private void think(Enemy e) {
+        int dx = e.x - posX;
+        int dy = e.y - posY;
+        int dist = (int) Math.sqrt((double) dx * dx + (double) dy * dy);
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
+        int roll = rnd.nextInt(8192);
+
+        boolean standOff = dist + stats.energy >= roll;
+        int toPlayer = angleTowards(-dx, -dy);
+
+        if (standOff) {
+            if (roll < 5000) {
+                wander(e);
+                return;
+            }
+            e.angle = toPlayer;
+            if (canShoot(e.x, e.y, posX, posY)) {
+                beginShooting(e);
+            } else {
+                wander(e);
+            }
+            return;
+        }
+
+        e.angle = toPlayer;
+        // me_w3: the closer the enemy is relative to its aggression, the likelier it fires.
+        int spread = dist + stats.aggression;
+        if (dist < (spread == 0 ? 1 : roll % spread) && canShoot(e.x, e.y, posX, posY)) {
+            beginShooting(e);
+        } else {
+            wander(e);
+        }
+    }
+
+    private void beginShooting(Enemy e) {
+        e.state = Enemy.SHOOTING;
+        e.counter = Enemy.SHOOT_COUNTER;
+    }
+
+    /** me_w4 then me_RepTurn: walk, and on a blocked step turn at random and retry up to 3 times. */
+    private void wander(Enemy e) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (stepEnemy(e)) {
+                e.phase = (e.phase + 1) & 3;
+                if (rnd.nextInt(256) >= 0xf0) {
+                    e.angle = (e.angle + (rnd.nextInt(127) - 63) * 2) & 511;
+                }
+                return;
+            }
+            e.angle = (e.angle + (rnd.nextInt(127) - 63) * 2) & 511;
+        }
+    }
+
+    /**
+     * me_MOVE: try to advance along the enemy's facing, refusing the step if it would cross a
+     * shut face, enter a column, land on another enemy, or walk into the player.
+     *
+     * @return true when the enemy actually moved
+     */
+    private boolean stepEnemy(Enemy e) {
+        double a = e.angle * 2.0 * Math.PI / 512.0;
+        int nx = e.x + (int) Math.round(Math.cos(a) * e.speed);
+        int ny = e.y + (int) Math.round(Math.sin(a) * e.speed);
+        if (nx < 0 || ny < 0 || nx >= 64 * Level.CELL_UNITS || ny >= 64 * Level.CELL_UNITS) {
+            return false;
+        }
+        int fromX = e.cellX(), fromY = e.cellY();
+        int cx = nx / Level.CELL_UNITS, cy = ny / Level.CELL_UNITS;
+        int inX = nx % Level.CELL_UNITS, inY = ny % Level.CELL_UNITS;
+
+        int other = level.enemyRef(cx, cy);
+        if (other != 0 && other != e.slot) {
+            return false;
+        }
+        final int r = Enemy.RADIUS;
+        final int far = Level.CELL_UNITS - r;
+        if ((inX < r && !level.isPassable(cx, cy, Level.WEST_DIR))
+                || (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR))
+                || (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR))
+                || (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR))) {
+            return false;
+        }
+        int col = level.column(cx, cy);
+        if (blockingColumn(col)
+                && inX >= 512 - Enemy.COLUMN_HALF && inX <= 512 + Enemy.COLUMN_HALF
+                && inY >= 512 - Enemy.COLUMN_HALF && inY <= 512 + Enemy.COLUMN_HALF) {
+            return false;
+        }
+        if (Math.abs(posX - nx) < Enemy.RADIUS && Math.abs(posY - ny) < Enemy.RADIUS) {
+            return false;
+        }
+
+        if (level.enemyRef(fromX, fromY) == e.slot) {
+            level.setEnemyRef(fromX, fromY, 0);
+        }
+        e.x = nx;
+        e.y = ny;
+        level.setEnemyRef(cx, cy, e.slot);
+        return true;
+    }
+
+    private void fire(Enemy e) {
+        if (!canShoot(e.x, e.y, posX, posY)) {
+            return;
+        }
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
+        int damage = 4 + stats.weapon * 2;
+        inventory.hurt(damage);
+        log.add(inventory.isAlive()
+                ? "hit for " + damage
+                : "you are dead");
+    }
+
+    /** Applies damage to an enemy, from the player's weapons. */
+    public void damageEnemy(Enemy e, int amount) {
+        e.energy -= amount;
+        if (e.energy <= 0) {
+            kill(e);
+        } else {
+            e.state = Enemy.HIT;
+            e.counter = 8;
+        }
+    }
+
+    private void kill(Enemy e) {
+        e.state = Enemy.KILLED;
+        if (level.enemyRef(e.cellX(), e.cellY()) == e.slot) {
+            level.setEnemyRef(e.cellX(), e.cellY(), 0);
+        }
+        log.add("enemy down");
+    }
+
+    /**
+     * Line of sight between two world positions.
+     *
+     * This is a grid walk rather than a transcription of CanShoot: it steps cell by cell from the
+     * shooter to the target and refuses the first face that is shut. The original unrolls the same
+     * idea per quadrant; the observable result is the same and this is far easier to follow.
+     */
+    public boolean canShoot(int fromX, int fromY, int toX, int toY) {
+        int cx = fromX / Level.CELL_UNITS, cy = fromY / Level.CELL_UNITS;
+        int tx = toX / Level.CELL_UNITS, ty = toY / Level.CELL_UNITS;
+        double dx = toX - fromX, dy = toY - fromY;
+        double len = Math.max(Math.abs(dx), Math.abs(dy));
+        if (len < 1) {
+            return true;
+        }
+        double x = fromX, y = fromY;
+        double sx = dx / len * 64, sy = dy / len * 64;
+        for (int guard = 0; guard < 4096; guard++) {
+            if (cx == tx && cy == ty) {
+                return true;
+            }
+            x += sx;
+            y += sy;
+            int ncx = (int) (x / Level.CELL_UNITS);
+            int ncy = (int) (y / Level.CELL_UNITS);
+            if (!Level.inside(ncx, ncy)) {
+                return false;
+            }
+            if (ncx != cx) {
+                int dir = (ncx > cx) ? Level.EAST_DIR : Level.WEST_DIR;
+                if (!level.isPassable(cx, cy, dir)) {
+                    return false;
+                }
+                cx = ncx;
+            }
+            if (ncy != cy) {
+                int dir = (ncy > cy) ? Level.NORTH_DIR : Level.SOUTH_DIR;
+                if (!level.isPassable(cx, cy, dir)) {
+                    return false;
+                }
+                cy = ncy;
+            }
+        }
+        return false;
+    }
+
+    private static int angleTowards(int dx, int dy) {
+        return (int) Math.round(Math.atan2(dy, (double) dx) * 256.0 / Math.PI) & 511;
+    }
+
+    // ------------------------------------------------------------- triggers
+
+    /** The wall face the player is looking at: the cell's face in the nearest cardinal direction. */
+    public int facingDir() {
+        // angle 0 faces +X (east, dir 1) and 128 faces +Y (north, dir 0)
+        int quadrant = ((angle + 64) >> 7) & 3;
+        switch (quadrant) {
+            case 0:  return Level.EAST_DIR;
+            case 1:  return Level.NORTH_DIR;
+            case 2:  return Level.WEST_DIR;
+            default: return Level.SOUTH_DIR;
+        }
+    }
+
+    /**
+     * The "use" action, i.e. what Check_RMB does with an empty hand: if the player faces a switch,
+     * find its record in the event stream and run the commands.
+     *
+     * @return true when something was actually triggered
+     */
+    public boolean use() {
+        int cx = cellX(), cy = cellY(), dir = facingDir();
+        if (!level.isSwitch(cx, cy, dir)) {
+            log.add("nothing to use here");
+            return false;
+        }
+        for (Level.Trigger t : level.triggers()) {
+            if (t.cellX == cx && t.cellY == cy && t.dir == dir) {
+                toggleSwitch(cx, cy, dir);
+                runCommands(t);
+                return true;
+            }
+        }
+        log.add("switch has no wiring");
+        return false;
+    }
+
+    /** Switch out is cell value 44, switch in is 46; using one flips it. */
+    private void toggleSwitch(int x, int y, int dir) {
+        int v = level.wallValue(x, y, dir);
+        int mirror = v & 1;
+        int base = v & 62;
+        level.setWallValue(x, y, dir, (base == 44 ? 46 : 44) | mirror);
+    }
+
+    private void runCommands(Level.Trigger t) {
+        int n = 0;
+        for (Level.Command c : t.commands) {
+            if (c.onRelease) {
+                continue; // press actions only; release actions need the held-button model
+            }
+            apply(c);
+            n++;
+        }
+        log.add("switch fired " + n + " command" + (n == 1 ? "" : "s"));
+    }
+
+    private void apply(Level.Command c) {
+        int x = c.cellX, y = c.cellY, d = c.dir;
+        if (!Level.inside(x, y)) {
+            return;
+        }
+        switch (c.code) {
+            case Level.Command.OPEN_DOOR:
+                forceDoor(x, y, d, true);
+                break;
+            case Level.Command.CLOSE_DOOR:
+                forceDoor(x, y, d, false);
+                break;
+            case Level.Command.SET_BLOCK:
+                level.setBlocked(x, y, true);
+                break;
+            case Level.Command.REMOVE_BLOCK:
+                level.setBlocked(x, y, false);
+                break;
+            case Level.Command.SET_WALL:
+                level.setWallValue(x, y, d, c.param);
+                geometryDirty = true;
+                break;
+            case Level.Command.SET_ITEM:
+                level.setItem(x, y, c.param);
+                geometryDirty = true;
+                break;
+            case Level.Command.SET_COLUMN:
+                level.setColumn(x, y, c.param);
+                geometryDirty = true;
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * rm_OpenDoor / rm_CloseDoor: a command driven door is set directly rather than animated by
+     * the two automatic channels, and it also flips the face on the far side.
+     */
+    private void forceDoor(int x, int y, int dir, boolean open) {
+        int v = level.wallValue(x, y, dir) & 62;
+        int type = (v >= 36 && v <= 41) ? 2 : 1;
+        int target = open ? (type == 1 ? 32 : 38) : (type == 1 ? 30 : 36);
+        setFace(x, y, dir, target);
+        int nx = x + Level.DX[dir], ny = y + Level.DY[dir];
+        if (Level.inside(nx, ny)) {
+            setFace(nx, ny, Level.OPPOSITE[dir], target);
+        }
+    }
+}

@@ -1,2 +1,7 @@
 *.code-workspace
 .vscode
+
+# build output
+build/
+tools/out/
+.gradle/

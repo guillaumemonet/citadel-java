@@ -26,7 +26,7 @@ Conversion has to run once before the game: the viewer loads its textures from `
 while level data is read straight out of the original `.MAP` files.
 
 **Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall you are
-facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand. `M` toggles the automap. `F5` and `F9` open the save and load menus.
+facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand. `M` toggles the automap. `-` and `+` adjust the game pace. `F5` and `F9` open the save and load menus.
 
 ## What works
 

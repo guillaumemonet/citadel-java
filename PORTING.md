@@ -79,6 +79,24 @@ the value `256 - angle` rather than the angle itself, which flips the X axis. So
 Getting this backwards mirrors east and west: the player walks fine, but every "use" lands on the
 wall behind the one they are facing. `facingAndForwardAgreeWithTheEngine` pins it down.
 
+## Two clocks
+
+The engine runs on two, and treating them as one makes the whole game run several times too fast.
+
+`NewLev3` is the **level-3 interrupt**, fires on the vertical blank at a fixed 50 Hz, and is where
+the level clock and the low-energy beep live. `MAIN_LOOP` is the **game loop**: it waits for *at
+least* one blank (`VBLANK` then `dbf sv_Opoznienie`) and then takes as long as the software
+renderer takes, which on real hardware is several frames.
+
+So `sv_WalkSpeed`'s 250 units, `sv_RotSpeed`'s 12, a door's five steps and one call to `Move_Enemy`
+are all **per pass of the loop**, not per video frame. Pacing them off the blank makes the player
+sprint, the view spin, and the enemies notice and open fire about three times too quickly.
+
+How fast that loop actually turned depends on the machine and the window size and is recorded
+nowhere, so `DEFAULT_LOOP_HZ` is an estimate for an A1200 at the default window and is adjustable:
+`-` and `+` in game, or `-Dcitadel.pace=` at launch. `movementIsPacedByTheLoopNotTheFrameRate` pins the
+separation down.
+
 ## Movement rules
 
 `GameState` reimplements the original's rules rather than substituting a physics engine, so the
@@ -108,7 +126,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 49 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 50 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.

@@ -95,6 +95,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
         currentMap = map.getName();
         game = new GameState(level);
+        String paceProperty = System.getProperty("citadel.pace");
+        if (paceProperty != null) {
+            pace = Float.parseFloat(paceProperty);
+        }
+        game.setLoopHz(pace);
         try {
             texts = citadel.core.TextTable.loadFrom(assets.dataRoot());
             game.setTexts(texts);
@@ -174,9 +179,13 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         inputManager.addMapping("load", new KeyTrigger(KeyInput.KEY_F9));
         inputManager.addMapping("confirm", new KeyTrigger(KeyInput.KEY_RETURN),
                 new KeyTrigger(KeyInput.KEY_NUMPADENTER));
+        inputManager.addMapping("slower", new KeyTrigger(KeyInput.KEY_MINUS),
+                new KeyTrigger(KeyInput.KEY_SUBTRACT));
+        inputManager.addMapping("faster", new KeyTrigger(KeyInput.KEY_EQUALS),
+                new KeyTrigger(KeyInput.KEY_ADD));
         inputManager.addListener(this,
                 "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire", "map",
-                "save", "load", "confirm");
+                "save", "load", "confirm", "slower", "faster");
 
         // 1..6 select a weapon, 0 goes back to the bare hand, as F1..F0 do in the original.
         int[] keys = {KeyInput.KEY_0, KeyInput.KEY_1, KeyInput.KEY_2, KeyInput.KEY_3,
@@ -215,6 +224,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             turnRight = pressed;
         } else if ("use".equals(name) && pressed) {
             game.use();
+        } else if ("slower".equals(name) && pressed) {
+            setPace(game.loopHz() - 2f);
+        } else if ("faster".equals(name) && pressed) {
+            setPace(game.loopHz() + 2f);
         } else if ("map".equals(name) && pressed) {
             automap.toggle();
         } else if ("save".equals(name) && pressed) {
@@ -268,6 +281,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             currentMap = f.getName();
             GameState fresh = new GameState(level);
             fresh.setTexts(texts);
+            fresh.setLoopHz(pace);
             copyInventory(carried, fresh.inventory);
             game = fresh;
 
@@ -454,12 +468,26 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
     }
 
+    /**
+     * Game pace, in passes of MAIN_LOOP per second. The original is bounded by how fast the
+     * software renderer could go, which is not recorded anywhere, so this is exposed as a setting:
+     * it governs walking, turning, doors and how quickly enemies notice you, all at once.
+     */
+    private void setPace(float hz) {
+        game.setLoopHz(hz);
+        pace = game.loopHz();
+        game.note(String.format("pace %.0f loops/s", pace));
+    }
+
+    private float pace = GameState.DEFAULT_LOOP_HZ;
+
     /** Restarts the current map from its spawn, keeping nothing but the campaign position. */
     private void restartLevel() {
         try {
             level = Level.load(new File(assets.mapsDir(), currentMap));
             game = new GameState(level);
             game.setTexts(texts);
+            game.setLoopHz(pace);
             rootNode.detachAllChildren();
             geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
             rootNode.attachChild(geometry.build());
@@ -493,6 +521,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             currentMap = map.getName();
             game = new GameState(level);
             game.setTexts(texts);
+            game.setLoopHz(pace);
             save.restore(slot, game, campaign);
 
             rootNode.detachAllChildren();

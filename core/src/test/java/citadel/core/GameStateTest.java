@@ -15,6 +15,9 @@ import static org.junit.jupiter.api.Assertions.fail;
 /** Exercises the level model and the movement rules against the shipped map data. */
 class GameStateTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static File mapsDir() {
         File[] candidates = {
                 new File("../Data/GAME/MAPS"),
@@ -98,7 +101,7 @@ class GameStateTest {
             }
 
             game.update(rnd.nextFloat() * 2 - 1, rnd.nextFloat() * 2 - 1,
-                    rnd.nextFloat() * 2 - 1, 1f / 60f);
+                    rnd.nextFloat() * 2 - 1, TICK);
 
             int cx = game.cellX(), cy = game.cellY();
             int dx = cx - prevX, dy = cy - prevY;
@@ -174,7 +177,7 @@ class GameStateTest {
         assertFalse(level.isPassable(spot[0], spot[1], spot[2]),
                 "the door should start shut");
         for (int i = 0; i < 10; i++) {
-            game.update(0, 0, 0, 1f / 60f);
+            game.update(0, 0, 0, TICK);
         }
         assertTrue(level.isPassable(spot[0], spot[1], spot[2]),
                 "the door next to the player never opened");
@@ -183,7 +186,7 @@ class GameStateTest {
         game.posX = 1 * Level.CELL_UNITS + 512;
         game.posY = 1 * Level.CELL_UNITS + 512;
         for (int i = 0; i < 20; i++) {
-            game.update(0, 0, 0, 1f / 60f);
+            game.update(0, 0, 0, TICK);
         }
         assertFalse(level.isPassable(spot[0], spot[1], spot[2]),
                 "the door stayed open after the player left");
@@ -299,7 +302,7 @@ class GameStateTest {
         GameState game = new GameState(level);
         game.posX = level.exitCellX * Level.CELL_UNITS + Level.CELL_UNITS / 2;
         game.posY = level.exitCellY * Level.CELL_UNITS + Level.CELL_UNITS / 2;
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
         assertTrue(game.isLevelComplete());
     }
 }

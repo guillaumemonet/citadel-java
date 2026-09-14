@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Covers firing: ammunition, wear, line of fire and the per-species vulnerability mask. */
 class WeaponTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static Level load(String name) throws Exception {
         File dir = new File("../Data/GAME/MAPS").isDirectory()
                 ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
@@ -146,7 +149,7 @@ class WeaponTest {
         game.fire();
         // the bolter fires a travelling object now, so let it reach the target
         for (int i = 0; i < 5; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
         }
 
         if (shocks) {

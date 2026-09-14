@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Covers objects in flight: which weapons make them, how far they go, and what they do on impact. */
 class ProjectileTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static Level load(String name) throws Exception {
         File dir = new File("../Data/GAME/MAPS").isDirectory()
                 ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
@@ -65,7 +68,7 @@ class ProjectileTest {
         game.fire();
         assertFalse(game.projectiles().isEmpty());
         for (int i = 0; i < 200; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
         }
         assertTrue(game.projectiles().isEmpty(), "an object outlived its counter");
     }
@@ -98,7 +101,7 @@ class ProjectileTest {
         game.fire();
         boolean sawExplosion = false;
         for (int i = 0; i < 10 && !sawExplosion; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
             for (Projectile p : game.projectiles()) {
                 sawExplosion |= p.type == Projectile.EXPLOSION;
             }
@@ -143,7 +146,7 @@ class ProjectileTest {
         int beyondX = cx + Level.DX[dir];
         int beyondY = cy + Level.DY[dir];
         for (int i = 0; i < 30; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
             for (Projectile p : game.projectiles()) {
                 assertFalse(p.cellX() == beyondX && p.cellY() == beyondY,
                         "an object crossed a shut wall into (" + beyondX + "," + beyondY + ")");
@@ -164,7 +167,7 @@ class ProjectileTest {
         game.projectiles().add(new Projectile(
                 Projectile.FIREBALL, shooter.x, shooter.y, shooter.angle, shooter.slot, false));
         for (int i = 0; i < 3; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
         }
         assertEquals(energy, shooter.energy, "the enemy shot itself");
     }

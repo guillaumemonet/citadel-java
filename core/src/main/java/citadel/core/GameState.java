@@ -30,8 +30,41 @@ public final class GameState {
     public static final int WALK_SPEED = 250;
     /** Turn speed per original frame, from sv_RotSpeed. */
     public static final int ROT_SPEED = 12;
-    /** The original runs on the PAL vertical blank. */
+    /** The PAL vertical blank, and with it the level clock and the low-energy beep. */
     public static final float FRAMES_PER_SECOND = 50f;
+
+    /**
+     * How many passes of MAIN_LOOP happen per second.
+     *
+     * This is <b>not</b> the vertical blank, and conflating the two is the easiest way to make the
+     * whole game run several times too fast. NewLev3 is the level-3 interrupt and does tick at a
+     * fixed 50 Hz, which is why the level clock counts real seconds. MAIN_LOOP only waits for
+     * <em>at least</em> one blank ({@code VBLANK} then {@code dbf sv_Opoznienie}) and then takes as
+     * long as the software renderer takes — several frames on real hardware.
+     *
+     * So sv_WalkSpeed's 250 units, sv_RotSpeed's 12, a door's five steps and one call to
+     * Move_Enemy are all *per pass of this loop*. Pacing them off the blank makes the player
+     * sprint, the view spin, and the enemies notice and shoot roughly three times too quickly.
+     *
+     * The true figure depends on the machine and the window size and is not recorded anywhere, so
+     * this is an estimate for an A1200 at the default window: adjustable, and documented as such.
+     */
+    public static final float DEFAULT_LOOP_HZ = 16f;
+
+    /** Loop passes caught up in one call, so a stall cannot teleport the world. */
+    private static final int MAX_CATCHUP = 4;
+
+    private float loopHz = DEFAULT_LOOP_HZ;
+    private float loopAccumulator;
+
+    public float loopHz() {
+        return loopHz;
+    }
+
+    /** Lets the front end offer this as a speed setting. */
+    public void setLoopHz(float hz) {
+        loopHz = Math.max(4f, Math.min(50f, hz));
+    }
 
     /** Column values that block movement, per .br2_COLUMN2: 1, 2 and 4, plus 18 (the barrel). */
     private static boolean blockingColumn(int v) {
@@ -61,8 +94,6 @@ public final class GameState {
     private TextTable texts;
     private final List<Enemy> enemies = new ArrayList<Enemy>();
     private final java.util.Random rnd = new java.util.Random(0x0C17ADE1L);
-    /** Accumulates fractional engine frames so the simulation ticks at the original rate. */
-    private float frameAccumulator;
 
     /**
      * Cells the player has seen, which is the automap. UpdateMap marks the cell underfoot plus
@@ -261,9 +292,27 @@ public final class GameState {
         if (playerDead) {
             return;
         }
-        float frames = dt * FRAMES_PER_SECOND;
+        // The vertical blank runs at a fixed 50 Hz whatever the renderer is doing, and that is
+        // where the level clock and the low-energy beep live.
+        serveCounters(dt * FRAMES_PER_SECOND);
+
+        // Everything else is paced by MAIN_LOOP, which is a different clock entirely.
+        loopAccumulator += dt * loopHz;
+        int ticks = Math.min(MAX_CATCHUP, (int) loopAccumulator);
+        loopAccumulator -= ticks;
+        for (int i = 0; i < ticks; i++) {
+            stepLoop(forward, strafe, turn);
+        }
+    }
+
+    /**
+     * One pass of MAIN_LOOP. Every distance and rate the engine holds — sv_WalkSpeed's 250,
+     * sv_RotSpeed's 12, a door's five steps, one call to Move_Enemy — is expressed per pass of
+     * this loop, not per video frame.
+     */
+    private void stepLoop(float forward, float strafe, float turn) {
         if (turn != 0f) {
-            angle = (angle - Math.round(turn * ROT_SPEED * frames)) & 511;
+            angle = (angle - Math.round(turn * ROT_SPEED)) & 511;
         }
 
         if (forward != 0f || strafe != 0f) {
@@ -274,8 +323,8 @@ public final class GameState {
                 forward /= mag;
                 strafe /= mag;
             }
-            double dx = (forward * forwardX() + strafe * rightX()) * inventory.walkSpeed() * frames;
-            double dy = (forward * forwardY() + strafe * rightY()) * inventory.walkSpeed() * frames;
+            double dx = (forward * forwardX() + strafe * rightX()) * inventory.walkSpeed();
+            double dy = (forward * forwardY() + strafe * rightY()) * inventory.walkSpeed();
             bumped = false;
             step(dx, dy);
             // br_BumpWall only counts a collision when the move was a real stride: it needs the
@@ -289,17 +338,9 @@ public final class GameState {
         takeItems();
         markVisited();
         checkExit();
-        serveCounters(frames);
-
-        // Enemies, counters and timers run on the original's frame clock, not on the renderer's.
-        frameAccumulator += frames;
-        int ticks = Math.min(4, (int) frameAccumulator);
-        frameAccumulator -= ticks;
-        for (int i = 0; i < ticks; i++) {
-            inventory.tick();
-            moveEnemies();
-            updateProjectiles();
-        }
+        inventory.tick();
+        moveEnemies();
+        updateProjectiles();
     }
 
     /**

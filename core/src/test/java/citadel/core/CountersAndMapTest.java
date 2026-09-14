@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Covers the level clock, running out of energy, and what the automap reveals. */
 class CountersAndMapTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static Level load(String name) throws Exception {
         File dir = new File("../Data/GAME/MAPS").isDirectory()
                 ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
@@ -21,17 +24,68 @@ class CountersAndMapTest {
         return Level.load(f);
     }
 
-    /** NewLev3 ticks sv_Time once every 50 frames, so the clock runs in real seconds. */
+    /**
+     * NewLev3 is the vertical blank interrupt, not the game loop, so the level clock counts real
+     * seconds regardless of how slowly MAIN_LOOP is turning. Fed six seconds of wall time it must
+     * read six, whatever {@link GameState#DEFAULT_LOOP_HZ} happens to be.
+     */
     @Test
-    void theLevelClockCountsSeconds() throws Exception {
+    void theLevelClockCountsRealSecondsNotLoopPasses() throws Exception {
         GameState game = new GameState(load("LEVEL01A.MAP"));
         assertEquals(0, game.levelSeconds());
-        for (int i = 0; i < 300; i++) {
-            game.update(0, 0, 0, 1f / 50f);   // 300 engine frames = 6 seconds
+        for (int i = 0; i < 60; i++) {
+            game.update(0, 0, 0, 0.1f);   // 6 seconds of wall time
         }
         assertFalse(game.isPlayerDead(),
                 "the player died during the test, energy " + game.inventory.energyReading());
         assertEquals(6, game.levelSeconds(), "the clock drifted");
+    }
+
+    /**
+     * Movement is paced by MAIN_LOOP, not by the blank. Walking for a second must cover the same
+     * ground whether the caller feeds one big step or many small ones, and it must scale with the
+     * loop rate rather than with the frame rate.
+     */
+    @Test
+    void movementIsPacedByTheLoopNotTheFrameRate() {
+        int fine = distanceWalked(1f / 120f, 120);   // one second at 120 fps
+        int coarse = distanceWalked(1f / 30f, 30);   // one second at 30 fps
+        assertTrue(Math.abs(fine - coarse) < Level.CELL_UNITS / 2,
+                "a second of walking differed with frame rate: " + fine + " vs " + coarse);
+
+        // and it is the loop rate, not the frame rate, that sets how far you get
+        GameState slow = new GameState(openLevel());
+        slow.setLoopHz(8f);
+        GameState fast = new GameState(openLevel());
+        fast.setLoopHz(32f);
+        int slowDist = walk(slow, 1f / 60f, 60);
+        int fastDist = walk(fast, 1f / 60f, 60);
+        assertTrue(fastDist > slowDist * 3,
+                "quadrupling the loop rate should cover about four times the ground: "
+                        + slowDist + " vs " + fastDist);
+    }
+
+    /** An empty grid, so the measurement is of pacing rather than of the nearest wall. */
+    private static Level openLevel() {
+        byte[] raw = new byte[MapFile.EVENTS_OFF + 4];
+        raw[MapFile.EVENTS_OFF] = (byte) 0xff;
+        raw[MapFile.EVENTS_OFF + 1] = (byte) 0xff;
+        // spawn in the middle, well clear of the grid edges
+        raw[MapFile.HEADER_OFF + 17] = 32;
+        raw[MapFile.HEADER_OFF + 19] = 32;
+        return new Level(new MapFile("open", raw));
+    }
+
+    private static int distanceWalked(float dt, int steps) {
+        return walk(new GameState(openLevel()), dt, steps);
+    }
+
+    private static int walk(GameState game, float dt, int steps) {
+        int x0 = game.posX, y0 = game.posY;
+        for (int i = 0; i < steps; i++) {
+            game.update(1, 0, 0, dt);
+        }
+        return (int) Math.hypot(game.posX - x0, game.posY - y0);
     }
 
     @Test
@@ -42,12 +96,12 @@ class CountersAndMapTest {
         game.inventory.energy = -1;
         assertTrue(game.inventory.isAlive());
         game.inventory.hurt(5);
-        game.update(0, 0, 0, 1f / 50f);
+        game.update(0, 0, 0, TICK);
 
         assertTrue(game.isPlayerDead(), "zero energy should be fatal");
         int x = game.posX;
         for (int i = 0; i < 50; i++) {
-            game.update(1, 0, 0, 1f / 50f);
+            game.update(1, 0, 0, TICK);
         }
         assertEquals(x, game.posX, "a dead player should not be able to walk");
     }
@@ -60,7 +114,7 @@ class CountersAndMapTest {
         game.inventory.energy = -9;
         assertTrue(game.isEnergyCritical());
         game.drainSounds();
-        game.update(0, 0, 0, 1f / 50f);
+        game.update(0, 0, 0, TICK);
         boolean beeped = false;
         for (GameState.SoundEvent e : game.drainSounds()) {
             beeped |= e.index == SoundTable.BEEP;
@@ -78,7 +132,7 @@ class CountersAndMapTest {
         GameState game = new GameState(level);
 
         assertFalse(game.isVisited(0, 0), "nothing should be revealed before the first update");
-        game.update(0, 0, 0, 1f / 50f);
+        game.update(0, 0, 0, TICK);
         assertTrue(game.isVisited(game.cellX(), game.cellY()), "the cell underfoot is revealed");
 
         // an open neighbour is revealed too; a walled one is not
@@ -96,7 +150,7 @@ class CountersAndMapTest {
 
         int before = countVisited(game);
         for (int i = 0; i < 400; i++) {
-            game.update(1, 0, 0.05f, 1f / 50f);
+            game.update(1, 0, 0.05f, TICK);
         }
         assertTrue(countVisited(game) > before, "walking around revealed nothing new");
     }
@@ -140,7 +194,7 @@ class CountersAndMapTest {
         int energy = game.inventory.energyReading();
 
         for (int i = 0; i < 30; i++) {
-            game.update(1, 0, 0, 1f / 50f);
+            game.update(1, 0, 0, TICK);
         }
         assertTrue(game.inventory.energyReading() < energy,
                 "running into a wall should hurt");

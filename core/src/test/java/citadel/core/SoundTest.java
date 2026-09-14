@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Checks the rules queue the sound the engine would have played. */
 class SoundTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static Level load(String name) throws Exception {
         File dir = new File("../Data/GAME/MAPS").isDirectory()
                 ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
@@ -108,7 +111,7 @@ class SoundTest {
         game.posX = spot[0] * Level.CELL_UNITS + 512;
         game.posY = spot[1] * Level.CELL_UNITS + 512;
         game.drainSounds();
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
 
         List<GameState.SoundEvent> events = game.drainSounds();
         boolean door = played(events, SoundTable.DOOR1) || played(events, SoundTable.DOOR2);
@@ -144,7 +147,7 @@ class SoundTest {
         game.posX = spot[0] * Level.CELL_UNITS + 512;
         game.posY = spot[1] * Level.CELL_UNITS + 512;
         game.drainSounds();
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
 
         assertTrue(played(game.drainSounds(), kind), "the pickup was silent");
     }

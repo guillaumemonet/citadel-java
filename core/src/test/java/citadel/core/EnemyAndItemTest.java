@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Covers item pickup, line of sight and the enemy movement rules. */
 class EnemyAndItemTest {
 
+    /** One pass of MAIN_LOOP, the clock movement and the enemies run on. */
+    private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
+
     private static Level load(String name) throws Exception {
         File dir = new File("../Data/GAME/MAPS").isDirectory()
                 ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
@@ -32,7 +35,7 @@ class EnemyAndItemTest {
         int before = game.inventory.energyReading();
         game.posX = spot[0] * Level.CELL_UNITS + Level.CELL_UNITS / 2;
         game.posY = spot[1] * Level.CELL_UNITS + Level.CELL_UNITS / 2;
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
 
         assertEquals(0, level.item(spot[0], spot[1]), "the item was not removed from the map");
         assertEquals(before + 30, game.inventory.energyReading(), "first aid did not heal");
@@ -52,7 +55,7 @@ class EnemyAndItemTest {
         assertEquals(Inventory.HAND, game.inventory.current);
         game.posX = spot[0] * Level.CELL_UNITS + Level.CELL_UNITS / 2;
         game.posY = spot[1] * Level.CELL_UNITS + Level.CELL_UNITS / 2;
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
 
         assertTrue(game.inventory.current != Inventory.HAND, "the weapon was not selected");
         assertTrue(game.inventory.owned[game.inventory.current]);
@@ -68,7 +71,7 @@ class EnemyAndItemTest {
         GameState game = new GameState(level);
         game.posX = spot[0] * Level.CELL_UNITS + 512 - 300;
         game.posY = spot[1] * Level.CELL_UNITS + 512;
-        game.update(0, 0, 0, 1f / 60f);
+        game.update(0, 0, 0, TICK);
         assertTrue(level.item(spot[0], spot[1]) != 0, "the item was collected from too far away");
     }
 
@@ -110,7 +113,7 @@ class EnemyAndItemTest {
             Level level = load(name);
             GameState game = new GameState(level);
             for (int i = 0; i < 600; i++) {
-                game.update(0, 0, 0, 1f / 50f);
+                game.update(0, 0, 0, TICK);
             }
             for (Enemy e : game.enemies()) {
                 if (e.isDead()) {
@@ -159,7 +162,7 @@ class EnemyAndItemTest {
             startY[i] = game.enemies().get(i).y;
         }
         for (int i = 0; i < 600; i++) {
-            game.update(0, 0, 0, 1f / 50f);
+            game.update(0, 0, 0, TICK);
         }
         int moved = 0;
         for (int i = 0; i < startX.length; i++) {

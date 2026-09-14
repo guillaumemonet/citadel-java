@@ -1,4 +1,4 @@
-| `gfx/complexN/` | 158 PNGs per complex# Citadel asset converter
+| `maps/` | one PNG overview and one text dump per level (walls, items, enemies, events), plus `INDEX.txt` || `gfx/complexN/` | 158 PNGs per complex# Citadel asset converter
 
 Converts the original 1995 Amiga data files into formats a jMonkeyEngine port can load: PNG
 textures and sprites, WAV sound effects, and readable dumps of the level data.

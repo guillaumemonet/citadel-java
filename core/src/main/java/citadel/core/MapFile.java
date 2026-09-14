@@ -299,6 +299,17 @@ public final class MapFile {
                     e.index, e.isSecondSpecies() ? 2 : 1, e.energy, e.x, e.y, hex.toString().trim()));
         }
 
+        sb.append("\n## Items\n");
+        sb.append("cell      value  what\n");
+        for (int y = 0; y < GRID; y++) {
+            for (int x = 0; x < GRID; x++) {
+                int v = item(x, y);
+                if (v != 0) {
+                    sb.append(String.format("(%2d,%2d)   %4d   %s%n", x, y, v, itemName(v)));
+                }
+            }
+        }
+
         List<String> ev = events();
         sb.append("\n## Events (").append(ev.size()).append(")\n");
         for (String s : ev) {
@@ -345,6 +356,27 @@ public final class MapFile {
         sb.append("enemy cells : ").append(enemies).append('\n');
         sb.append("blocked     : ").append(blocks).append('\n');
         return sb.toString();
+    }
+
+    /** What an item cell value is, following the dispatch chain in Take_Items. */
+    public static String itemName(int value) {
+        if (value >= 2 && value < 8) {
+            return "weapon: " + Inventory.WEAPON_NAMES[value - 1];
+        }
+        if (value >= 8 && value < 14) {
+            return "ammunition for the " + Inventory.WEAPON_NAMES[value - 7];
+        }
+        if (value >= 14 && value < 17) {
+            return "card " + "RGB".charAt(value - 14);
+        }
+        switch (value) {
+            case 17: return "first aid";
+            case 18: return "speed boost";
+            case 19: return "vodka";
+            case 20: return "warhead section";
+            case 1:  return "hand (not normally placed)";
+            default: return "unknown";
+        }
     }
 
     /** Door cell values, per the editor DrawMap dispatch. */

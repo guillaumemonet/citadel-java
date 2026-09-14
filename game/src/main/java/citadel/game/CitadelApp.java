@@ -258,6 +258,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     private final citadel.core.Campaign campaign = new citadel.core.Campaign();
     private Assets assets;
+
     private String currentMap;
     private boolean advancing;
 
@@ -422,6 +423,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         if (hudPanel != null) {
             hudPanel.setCullHint(hint);
+        }
+        if (weaponView != null) {
+            weaponView.setCullHint(hint);
         }
         if (compass != null) {
             compass.picture().setCullHint(hint);
@@ -624,6 +628,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         geometry.syncProjectiles(game);
         automap.update(game);
         compass.update(game);
+        syncWeaponView(assets, Assets.complexOf(currentMap));
         sound.serve(game);
         syncCamera();
         updateHud();
@@ -658,6 +663,49 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     /** Dark band the readout sits on, since white text on a lit ceiling is barely there. */
     private com.jme3.ui.Picture hudPanel;
+
+    /** The weapon in hand, drawn at the bottom of the view as ci_DrawWeapon does. */
+    private com.jme3.ui.Picture weaponView;
+    private int weaponShown = -1;
+
+    /**
+     * Shows the held weapon. The item sprites double as the held ones: an item worth n on the
+     * floor is sprite n-1, and picking it up puts it in slot n-1, so the slot number indexes the
+     * sprite directly. Slot 0 is the bare hand, which is sprite 0.
+     */
+    private void syncWeaponView(Assets assets, int complex) {
+        int slot = game.inventory.current;
+        if (slot == weaponShown) {
+            return;
+        }
+        weaponShown = slot;
+        if (!assets.exists(complex, "item", slot)) {
+            if (weaponView != null) {
+                weaponView.removeFromParent();
+            }
+            return;
+        }
+        com.jme3.asset.TextureKey key =
+                new com.jme3.asset.TextureKey(assets.texturePath(complex, "item", slot), true);
+        key.setGenerateMips(false);
+        com.jme3.texture.Texture tex = assetManager.loadTexture(key);
+        tex.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
+        tex.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);
+
+        if (weaponView == null) {
+            weaponView = new com.jme3.ui.Picture("weapon");
+            float side = cam.getHeight() * 0.46f;
+            weaponView.setWidth(side);
+            weaponView.setHeight(side);
+            weaponView.setPosition((cam.getWidth() - side) / 2f, 0f);
+        }
+        weaponView.setTexture(assetManager, (com.jme3.texture.Texture2D) tex, true);
+        weaponView.getMaterial().getAdditionalRenderState()
+                .setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+        if (weaponView.getParent() == null) {
+            guiNode.attachChild(weaponView);
+        }
+    }
 
     private void setupHud() {
         float bandHeight = 56f;

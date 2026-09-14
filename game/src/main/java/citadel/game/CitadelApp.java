@@ -44,6 +44,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private Level level;
     private GameState game;
     private LevelGeometry geometry;
+    private SoundSystem sound;
     private BitmapText hud;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
@@ -98,6 +99,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
         }
         geometry = new LevelGeometry(level, assets, complex);
+        sound = new SoundSystem(assetManager, rootNode, assets);
         rootNode.attachChild(geometry.build());
 
         viewPort.setBackgroundColor(ColorRGBA.Black);
@@ -235,6 +237,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         geometry.syncDoors(game);
         geometry.syncEnemies(game);
+        sound.serve(game);
         syncCamera();
         updateHud();
     }

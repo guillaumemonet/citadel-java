@@ -22,6 +22,7 @@ Output:
 | `gfx/complexN/` | 146 PNGs per complex (walls, columns, items, objects, blood, both enemy species) plus the palette |
 | `maps/` | one PNG overview and one text dump per level, plus `INDEX.txt` |
 | `sounds/` | the 25 effects as WAV, at their original Paula rates |
+| `intro/` | the three intro animations as PNG frames, plus 46 loose IFF artwork images |
 | `raw/` | tile atlases, for eyeballing the decode |
 
 Everything below was derived from the assembly sources in this repository and verified against
@@ -125,7 +126,7 @@ Wall values worth knowing, tested as `value & 0x3e` (so twice the texture index)
 
 | offset | meaning |
 |---|---|
-| 4 | enemy species 1: hits, two 2-bit fields |
+| 4 | enemy species 1: **vulnerability mask**, 4 bits |
 | 5 | enemy species 1: weapon |
 | 6 | enemy species 1: energy |
 | 8 | enemy species 1: aggression (always a multiple of 50) |
@@ -134,11 +135,17 @@ Wall values worth knowing, tested as `value & 0x3e` (so twice the texture index)
 | 20 | spawn facing (unconfirmed) |
 | 22, 24 | level exit cell |
 
+Byte 4 is where the editor shows two 2-bit "hits" fields, but `EnemyHitServe` reads it as a mask,
+one bit per damage type: bit 0 bullets, bit 1 fireballs, bit 2 electricity, bit 3 rockets. A
+species with the bit clear takes no damage at all from that type.
+
 ### Enemy entry, 16 bytes
 
-Confirmed: `+1` flags (bit 7 selects species 2), `+4` world X, `+6` world Y (1024 units per cell),
-`+12` state (0 walking, 1 hit, 2 killed, 3 burning, 4 shooting). `+2` and `+10` are both counters
-that look like energy; the rest is not yet identified, so the text dump prints all 16 raw bytes.
+Fully accounted for: `+1` flags (**bit 0** selects the species, per the `btst #0` in Move_Enemy;
+bit 7 is unrelated and only asks the renderer to draw that one behind a column), `+2` energy,
+`+4` world X, `+6` world Y (1024 units per cell), `+8` facing, `+10` walk speed in units per
+frame, `+12` state (0 walking, 1 hit, 2 killed, 3 burning, 4 shooting), `+13` state counter.
+Bytes 0, 14 and 15 are still unidentified, so the text dump prints all 16.
 
 Only 24x24 cells around the player are simulated per frame (`Move_Enemy`).
 
@@ -174,8 +181,42 @@ byte goes negative. Codes, matching the `"ODCDSBRB W I C"` table in the editor:
 The last entry ends at byte 102 108, exactly the size the source comments give for the block, and
 every length matches a file in `Data/GAME/Sounds`, which is what fixes the names.
 
+The `SOUND` macro's argument is **1-based**: `play_sound` does `subq #1,d0` before scaling by the
+8-byte entry size. Reading every call site pins each sound to what it is actually played for, and
+twelve of them agree with the file names — but **handgun and launcher are swapped**:
+`rm_HandGunUsed` plays `SOUND 7`, whose sample ships as `launcher.snd`, and `rm_LauncherUsed`
+plays `SOUND 3`, shipped as `handgun.snd`. The indices are the authority; `SoundTable` exposes
+them as named constants for that reason.
+
+## Intro animations: `Data/INTRO/ANIM2`
+
+The repository README says the intro animations are missing. **They are not.** `start`, `kabina`
+and `explozycja` are ordinary IFF `FORM ANIM` files, 320x200 in 6 bitplanes, and they decode: 27,
+20 and 27 frames respectively.
+
+Structure is the standard one: a container of `FORM ILBM`s where the first carries `BMHD`, `CMAP`
+and a full `BODY`, and each one after that carries an `ANHD` plus a `DLTA` to apply to the frame
+before it. All three use `ANHD` operation 5, byte vertical delta.
+
+Two things bite:
+
+- **Extra Half-Brite.** Six bitplanes but only 32 `CMAP` entries: the top 32 colours are the
+  bottom 32 at half brightness. Without expanding them the upper half of the palette reads as
+  black. `CAMG` bit 0x80 announces it, and a short CMAP against six planes settles it anyway.
+- The `.k` files beside them are *not* IFF. They start with a literal `ANIM`, a palette of 12-bit
+  RGB words and a `BODY`; they are the engine's own repacked form, produced by
+  `Code/IntroPlayer/AnimConvert01.ss`. Not decoded yet, and not needed while the IFF originals
+  are present.
+
+**Unconfirmed:** all three decode with content confined to roughly the top-left 200x105 of the
+320x200 frame, the rest solid black. That is consistent with the data — the `BODY` is consumed
+exactly, the deltas animate correctly, and the same reader decodes the title screen full-frame —
+so it is most likely a window the intro player composites, with `Napisy.a`/`Napisy.g` (subtitles)
+filling the rest. Worth confirming against `IntroReplayer_125.ss` before building anything on it.
+
 ## Not converted yet
 
+- the `.k` repacked animations beside the IFF ones
 - `Store/ROTTABLE.DAT`, 64 pre-sorted cell visibility lists, one per view angle. The software
   renderer walks these back to front; a jMonkeyEngine port does its own culling and will not need
   them.

@@ -43,13 +43,15 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
   sight into account, and shoot.
 - Weapons fire: hitscan resolution like the original, ammunition, weapon wear, and the 4-bit
   vulnerability mask that makes some species immune to some damage types.
+- Sound: the 25 effects play, positioned in the world for doors and enemies.
+- The intro animations decode. The original README says they were lost; they are not.
 
 ## What is missing
 
 - Travelling projectiles (`Anim_Objects`): rocket splash damage and flame trails.
 - HUD proper, automap, compass, and the menu and inventory layer (`SERVER`).
-- Sound playback — the effects are converted to WAV but nothing plays them yet.
-- Intro and death sequences.
+- The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
+- Death sequence, and the menu and briefing screens.
 
 `PORTING.md` keeps an honest list of the known gaps.
 

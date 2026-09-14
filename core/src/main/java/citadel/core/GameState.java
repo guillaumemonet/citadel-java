@@ -104,6 +104,48 @@ public final class GameState {
         log.add(message);
     }
 
+    /**
+     * A sound the rules asked for. The front end decides how to play it; positional sounds carry
+     * the world coordinates the engine would have used to scale the volume (Sound_Distance).
+     */
+    public static final class SoundEvent {
+        /** Index into {@link SoundTable#ALL}. */
+        public final int index;
+        public final int worldX;
+        public final int worldY;
+        /** True when the sound comes from somewhere in the level rather than from the player. */
+        public final boolean positional;
+
+        SoundEvent(int index, int worldX, int worldY, boolean positional) {
+            this.index = index;
+            this.worldX = worldX;
+            this.worldY = worldY;
+            this.positional = positional;
+        }
+    }
+
+    private final List<SoundEvent> sounds = new ArrayList<SoundEvent>();
+
+    public List<SoundEvent> drainSounds() {
+        List<SoundEvent> out = new ArrayList<SoundEvent>(sounds);
+        sounds.clear();
+        return out;
+    }
+
+    /** Queues a sound heard at the player's own position. */
+    private void playSound(int index) {
+        if (index >= 0) {
+            sounds.add(new SoundEvent(index, posX, posY, false));
+        }
+    }
+
+    /** Queues a sound coming from a point in the level, as the SOUND2 macro does. */
+    private void playSoundAt(int index, int x, int y) {
+        if (index >= 0) {
+            sounds.add(new SoundEvent(index, x, y, true));
+        }
+    }
+
     /** Messages the last update produced, for the HUD or for debugging. Cleared by the caller. */
     public List<String> drainLog() {
         List<String> out = new ArrayList<String>(log);
@@ -216,6 +258,10 @@ public final class GameState {
         if (what == null) {
             return;
         }
+        playSound(item >= Inventory.FIRST_AMMO && item < Inventory.FIRST_CARD
+                ? SoundTable.TAKE_AMMO
+                : item >= Inventory.MEDIKIT && item <= Inventory.VODKA
+                        ? SoundTable.TAKE_AID : SoundTable.TAKE_ITEM);
         level.setItem(cx, cy, 0);
         geometryDirty = true;
         log.add(what);
@@ -479,6 +525,11 @@ public final class GameState {
         }
         int v = level.wallValue(cx, cy, d) & 0xff;
         slot.counter = (v == slot.open) ? 0 : 5;
+        if (slot.counter != 0) {
+            // OpenCloseDoors plays the door sound at the door's own cell, via SOUND2.
+            playSoundAt(slot.type == 1 ? SoundTable.DOOR1 : SoundTable.DOOR2,
+                    cx * Level.CELL_UNITS + 512, cy * Level.CELL_UNITS + 512);
+        }
     }
 
     private void animate(DoorSlot slot) {
@@ -667,6 +718,7 @@ public final class GameState {
         Level.EnemyTemplate stats = level.enemyTemplates[e.species];
         int damage = 4 + stats.weapon * 2;
         inventory.hurt(damage);
+        playSound(SoundTable.PLAYER_HURT);
         log.add(inventory.isAlive()
                 ? "hit for " + damage
                 : "you are dead");
@@ -781,16 +833,19 @@ public final class GameState {
             return false;
         }
         if (inventory.ammo[w] >= 0) {
+            playSound(SoundTable.NO_AMMO);
             log.add("no ammunition");
             return false;
         }
         if (inventory.condition[w] <= 0) {
+            playSound(SoundTable.NO_AMMO);
             log.add("the " + Inventory.WEAPON_NAMES[w] + " is broken");
             return false;
         }
         // DamageWeapon wears the weapon down by 0 or 1 per shot.
         inventory.condition[w] = Math.max(0, inventory.condition[w] - rnd.nextInt(2));
         inventory.ammo[w]++;
+        playSound(SoundTable.fireSound(w));
 
         int type = WEAPON_SHOT[w];
         int pellets = WEAPON_PELLETS[w];
@@ -876,6 +931,8 @@ public final class GameState {
         // the enemy turns to face whoever shot it
         e.angle = (angle + 256) & 511;
         e.energy -= SHOT_DAMAGE[type];
+        playSoundAt(SoundTable.ENEMY_ROAR_FIRST + rnd.nextInt(SoundTable.ENEMY_ROAR_COUNT),
+                e.x, e.y);
         if (e.energy > 0) {
             e.state = Enemy.HIT;
             e.counter = 8;
@@ -925,6 +982,7 @@ public final class GameState {
         for (Level.Trigger t : level.triggers()) {
             if (t.cellX == cx && t.cellY == cy && t.dir == dir) {
                 toggleSwitch(cx, cy, dir);
+                playSound(SoundTable.SWITCH);
                 runCommands(t);
                 return true;
             }

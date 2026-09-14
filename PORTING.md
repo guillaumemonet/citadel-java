@@ -107,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 21 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 27 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -123,13 +123,15 @@ Done:
 - item pickup and a working inventory (weapons, ammo, cards, first aid, boost, vodka, warhead)
 - enemy simulation: roaming, closing in, line of sight, shooting, damage and death
 - player weapons: hitscan fire, ammunition, weapon wear, per-species vulnerability mask
+- sound: 25 effects, positioned in the world for doors and enemies
+- intro animations decoded to PNG frames (IFF ANIM, op 5, Extra Half-Brite)
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
 - the on-screen counters and their timers (`Test_Counters`)
 - HUD proper, automap, compass, the menu and inventory layer (`SERVER`)
-- sound playback, intro and death sequences
+- playing the intro in-game, and the death sequence
 
 ## Enemies
 

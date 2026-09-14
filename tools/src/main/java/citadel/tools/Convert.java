@@ -36,16 +36,19 @@ public final class Convert {
     private File mapsDir;
     private File soundsDir;
     private File storeDir;
+    private File dataRoot;
     private File out;
 
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
-            System.out.println("usage: Convert <dataDir> <outDir> [--gfx] [--maps] [--sounds] [--raw]");
+            System.out.println("usage: Convert <dataDir> <outDir>"
+                    + " [--gfx] [--maps] [--sounds] [--intro] [--raw]");
             System.exit(2);
         }
         List<String> flags = Arrays.asList(args).subList(2, args.length);
         boolean any = flags.contains("--gfx") || flags.contains("--maps")
-                || flags.contains("--sounds") || flags.contains("--raw");
+                || flags.contains("--sounds") || flags.contains("--intro")
+                || flags.contains("--raw");
 
         Convert c = new Convert();
         c.resolve(new File(args[0]), new File(args[1]));
@@ -57,6 +60,9 @@ public final class Convert {
         }
         if (!any || flags.contains("--sounds")) {
             c.convertSounds();
+        }
+        if (!any || flags.contains("--intro")) {
+            c.convertIntro(c.dataRoot);
         }
         if (flags.contains("--raw")) {
             c.dumpRawTiles();
@@ -70,6 +76,9 @@ public final class Convert {
         mapsDir = new File(root, "MAPS");
         soundsDir = new File(root, "Sounds");
         storeDir = new File(root, "Store");
+        // the intro lives beside GAME, not inside it
+        dataRoot = "GAME".equals(root.getName()) && root.getParentFile() != null
+                ? root.getParentFile() : root;
         out = outDir;
         Io.mkdirs(out);
         System.out.println("data : " + root.getAbsolutePath());
@@ -244,6 +253,73 @@ public final class Convert {
             sb.append(s).append('\n');
         }
         return sb.toString();
+    }
+
+    // --------------------------------------------------------------- intro
+
+    /**
+     * Decodes the intro sequences and the loose IFF artwork.
+     *
+     * Worth saying plainly: the repository README states the intro animations are gone. They are
+     * not. Data/INTRO/ANIM2 holds three ordinary IFF ANIMs, and they decode.
+     */
+    private void convertIntro(File dataRoot) throws IOException {
+        File animDir = new File(dataRoot, "INTRO/ANIM2");
+        File outDir = new File(out, "intro");
+        Io.mkdirs(outDir);
+        StringBuilder log = new StringBuilder("name        size      planes  frames\n");
+
+        File[] anims = animDir.listFiles();
+        if (anims != null) {
+            Arrays.sort(anims);
+            for (File f : anims) {
+                if (!f.isFile() || f.getName().endsWith(".k")) {
+                    continue; // .k files are the engine's own repacked form, not IFF
+                }
+                try {
+                    AnimReader anim = AnimReader.load(f);
+                    File frames = new File(outDir, f.getName());
+                    Io.mkdirs(frames);
+                    for (int i = 0; i < anim.frameCount(); i++) {
+                        ImageIO.write(anim.frame(i), "png",
+                                new File(frames, String.format("%03d.png", i)));
+                    }
+                    log.append(String.format("%-10s  %4dx%-4d  %6d  %6d%n",
+                            f.getName(), anim.width, anim.height, anim.planes, anim.frameCount()));
+                    System.out.printf("intro %s: %d frames%n", f.getName(), anim.frameCount());
+                } catch (IOException e) {
+                    System.out.println("  " + f.getName() + ": " + e.getMessage());
+                }
+            }
+        }
+
+        // loose artwork, which is plain ILBM
+        int art = 0;
+        for (String dir : new String[]{"INTRO/ART_INNE", "GAME/Gfx_IFF", "GAME/ScreenShots"}) {
+            File src = new File(dataRoot, dir);
+            File[] files = src.listFiles();
+            if (files == null) {
+                continue;
+            }
+            Arrays.sort(files);
+            File dst = new File(outDir, "art");
+            Io.mkdirs(dst);
+            for (File f : files) {
+                if (!f.isFile()) {
+                    continue;
+                }
+                try {
+                    IffReader iff = IffReader.load(f);
+                    String base = f.getName().replaceAll("[^A-Za-z0-9._-]+", "_");
+                    ImageIO.write(iff.toImage(), "png", new File(dst, base + ".png"));
+                    art++;
+                } catch (IOException e) {
+                    // not an ILBM, skip quietly: these folders hold raw data too
+                }
+            }
+        }
+        Io.writeText(new File(outDir, "INDEX.txt"), log.toString());
+        System.out.println("intro: " + art + " artwork images");
     }
 
     // -------------------------------------------------------------- sounds

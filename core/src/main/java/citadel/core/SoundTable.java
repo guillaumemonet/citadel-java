@@ -65,6 +65,52 @@ public final class SoundTable {
             new Sfx("shotgun",  97536,  4572, 0x290),
     };
 
+    /**
+     * Indices by what the engine actually plays them for, taken from every {@code SOUND} macro
+     * call site. The macro argument is 1-based: play_sound does {@code subq #1,d0} before scaling
+     * by the 8-byte entry size, so entry n in the source is index n-1 here.
+     *
+     * These are the authority, not the file names. Twelve of them agree with the names in
+     * Data/GAME/Sounds, but <b>handgun and launcher are swapped</b>: rm_HandGunUsed plays SOUND 7,
+     * whose sample is the one shipped as launcher.snd, and rm_LauncherUsed plays SOUND 3, shipped
+     * as handgun.snd. The names in {@link #ALL} stay as they are so they remain traceable to the
+     * files on disk; use the constants below to pick a sound.
+     */
+    public static final int SWITCH = 1;          // SOUND 2,  rm_ServeSwitch
+    public static final int NO_AMMO = 7;         // SOUND 8,  every weapon's empty and broken case
+    public static final int FIRE_HANDGUN = 6;    // SOUND 7,  rm_HandGunUsed
+    public static final int FIRE_SHOTGUN = 24;   // SOUND 25, rm_ShotGunUsed
+    public static final int FIRE_MACHINEGUN = 23; // SOUND 24, rm_MachineGun
+    public static final int FIRE_FLAMER = 4;     // SOUND 5,  rm_FlamerUsed
+    public static final int FIRE_BOLTER = 5;     // SOUND 6,  rm_BolterUsed
+    public static final int FIRE_LAUNCHER = 2;   // SOUND 3,  rm_LauncherUsed
+    public static final int EXPLODE = 10;        // SOUND2 11, ro_SetExplode
+    public static final int DOOR1 = 8;           // SOUND2 9,  OpenCloseDoors
+    public static final int DOOR2 = 9;           // SOUND2 10, OpenCloseDoors
+    public static final int DOOR3 = 15;          // SOUND2 16, OpenCloseDoors
+    public static final int TAKE_AMMO = 11;      // SOUND 12, ti_ammo
+    public static final int TAKE_ITEM = 22;      // SOUND 23, weapon and card pickups
+    public static final int TAKE_AID = 14;       // SOUND 15, medikit, power and vodka
+    public static final int PLAYER_HURT = 12;    // SOUND 13, oc_PlayerHit
+    public static final int BUMP = 0;            // SOUND 1,  walking into a wall
+    public static final int CARD = 20;           // SOUND 21, using a card
+    /** Enemy roars, picked at random from this run of four (SOUND4 with d2 in 18..21). */
+    public static final int ENEMY_ROAR_FIRST = 17;
+    public static final int ENEMY_ROAR_COUNT = 4;
+
+    /** Fire sound for a weapon slot, 0 being the bare hand. */
+    public static int fireSound(int weaponSlot) {
+        switch (weaponSlot) {
+            case 1: return FIRE_HANDGUN;
+            case 2: return FIRE_SHOTGUN;
+            case 3: return FIRE_MACHINEGUN;
+            case 4: return FIRE_FLAMER;
+            case 5: return FIRE_BOLTER;
+            case 6: return FIRE_LAUNCHER;
+            default: return -1;
+        }
+    }
+
     private SoundTable() {
     }
 

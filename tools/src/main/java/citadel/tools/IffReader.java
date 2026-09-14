@@ -39,6 +39,7 @@ public final class IffReader {
             throw new IOException(f + ": not an ILBM file");
         }
         int w = 0, h = 0, planes = 0, compression = 0, masking = 0;
+        int cmapEntries = 0, camg = 0;
         int[] pal = new int[256];
         byte[] body = null;
 
@@ -62,7 +63,10 @@ public final class IffReader {
                             | (Io.u8(d, payload + i * 3) << 16)
                             | (Io.u8(d, payload + i * 3 + 1) << 8)
                             | Io.u8(d, payload + i * 3 + 2);
+                    cmapEntries = i + 1;
                 }
+            } else if ("CAMG".equals(id)) {
+                camg = readS32(d, payload);
             } else if ("BODY".equals(id)) {
                 body = new byte[len];
                 System.arraycopy(d, payload, body, 0, len);
@@ -72,6 +76,9 @@ public final class IffReader {
         if (body == null || w == 0 || planes == 0) {
             throw new IOException(f + ": incomplete ILBM");
         }
+
+        // Six planes against a 32-entry CMAP means Extra Half-Brite; fill in the derived half.
+        AnimReader.expandHalfBrite(pal, cmapEntries, planes, camg);
 
         int rowBytes = ((w + 15) / 16) * 2;
         int totalPlanes = planes + (masking == 1 ? 1 : 0);

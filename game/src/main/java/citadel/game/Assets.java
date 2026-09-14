@@ -45,6 +45,10 @@ public final class Assets {
         return f;
     }
 
+    public File dataRoot() {
+        return dataRoot;
+    }
+
     public File mapsDir() {
         return new File(dataRoot, "GAME/MAPS");
     }

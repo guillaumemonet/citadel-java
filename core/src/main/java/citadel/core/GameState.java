@@ -57,6 +57,8 @@ public final class GameState {
     private final List<String> log = new ArrayList<String>();
 
     public final Inventory inventory = new Inventory();
+    /** The original message table, when the front end supplies one. */
+    private TextTable texts;
     private final List<Enemy> enemies = new ArrayList<Enemy>();
     private final java.util.Random rnd = new java.util.Random(0x0C17ADE1L);
     /** Accumulates fractional engine frames so the simulation ticks at the original rate. */
@@ -70,6 +72,20 @@ public final class GameState {
         for (Level.EnemySpawn spawn : level.enemySpawns()) {
             enemies.add(new Enemy(spawn));
         }
+    }
+
+    /** Hands the rules the original message table so they stop inventing their own wording. */
+    public void setTexts(TextTable texts) {
+        this.texts = texts;
+    }
+
+    /** A message from the table, falling back to the supplied wording when there is no table. */
+    private String text(int index, String fallback) {
+        if (texts == null) {
+            return fallback;
+        }
+        String s = texts.get(index);
+        return s.isEmpty() ? fallback : s;
     }
 
     public List<Enemy> enemies() {
@@ -264,7 +280,10 @@ public final class GameState {
                         ? SoundTable.TAKE_AID : SoundTable.TAKE_ITEM);
         level.setItem(cx, cy, 0);
         geometryDirty = true;
-        log.add(what);
+        // Take_Items computes its SCROLL1 index as base + offset, and every branch works out to
+        // the item value itself: weapons 2 + (v-2), ammunition 8 + (v-8), cards 14 + (v-14), and
+        // the rest are literal SCROLLs at 17, 18 and 19.
+        log.add(text(item, what));
     }
 
     /**
@@ -834,12 +853,13 @@ public final class GameState {
         }
         if (inventory.ammo[w] >= 0) {
             playSound(SoundTable.NO_AMMO);
-            log.add("no ammunition");
+            log.add(text(TextTable.OUT_OF_AMMO, "no ammunition"));
             return false;
         }
         if (inventory.condition[w] <= 0) {
             playSound(SoundTable.NO_AMMO);
-            log.add("the " + Inventory.WEAPON_NAMES[w] + " is broken");
+            log.add(text(TextTable.WEAPON_DAMAGED,
+                    "the " + Inventory.WEAPON_NAMES[w] + " is broken"));
             return false;
         }
         // DamageWeapon wears the weapon down by 0 or 1 per shot.
@@ -976,7 +996,7 @@ public final class GameState {
     public boolean use() {
         int cx = cellX(), cy = cellY(), dir = facingDir();
         if (!level.isSwitch(cx, cy, dir)) {
-            log.add("nothing to use here");
+            log.add(text(TextTable.SEE_NOTHING, "nothing to use here"));
             return false;
         }
         for (Level.Trigger t : level.triggers()) {
@@ -987,7 +1007,7 @@ public final class GameState {
                 return true;
             }
         }
-        log.add("switch has no wiring");
+        log.add(text(TextTable.SWITCH_STUCK, "switch has no wiring"));
         return false;
     }
 
@@ -1008,7 +1028,8 @@ public final class GameState {
             apply(c);
             n++;
         }
-        log.add("switch fired " + n + " command" + (n == 1 ? "" : "s"));
+        log.add(text(TextTable.SWITCH_USED,
+                "switch fired " + n + " command" + (n == 1 ? "" : "s")));
     }
 
     private void apply(Level.Command c) {

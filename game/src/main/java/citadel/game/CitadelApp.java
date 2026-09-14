@@ -74,7 +74,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     @Override
     public void simpleInitApp() {
-        Assets assets = new Assets(assetManager);
+        assets = new Assets(assetManager);
         File map = findMap(assets.mapsDir(), requested);
         if (map == null) {
             throw new IllegalStateException("no map matching '" + requested
@@ -88,7 +88,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         int complex = Assets.complexOf(map.getName());
         System.out.println("loaded " + level + "  (complex " + complex + ")");
 
+        currentMap = map.getName();
         game = new GameState(level);
+        try {
+            texts = citadel.core.TextTable.loadFrom(assets.dataRoot());
+            game.setTexts(texts);
+        } catch (Exception e) {
+            System.out.println("no TEXT file found, using plain wording");
+        }
         String at = System.getProperty("citadel.at");
         if (at != null) {
             String[] parts = at.split(",");
@@ -190,6 +197,61 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private boolean firing;
     private static final int MACHINEGUN = 3;
 
+    private final citadel.core.Campaign campaign = new citadel.core.Campaign();
+    private Assets assets;
+    private String currentMap;
+    private boolean advancing;
+
+    /**
+     * Walks the ETAPY sequence: reaching the exit cell loads the next map and carries the player's
+     * inventory across, which is what the server does by keeping it in STRUCTURE between levels.
+     */
+    private void advanceToNextLevel() {
+        citadel.core.Campaign.Stage next = campaign.next(currentMap);
+        if (next == null) {
+            game.note("THE CITADEL HAS FALLEN");
+            return;
+        }
+        File f = campaign.file(assets.mapsDir(), next);
+        if (f == null) {
+            game.note("missing map " + next.mapName());
+            return;
+        }
+        try {
+            citadel.core.Inventory carried = game.inventory;
+            level = Level.load(f);
+            currentMap = f.getName();
+            GameState fresh = new GameState(level);
+            fresh.setTexts(texts);
+            copyInventory(carried, fresh.inventory);
+            game = fresh;
+
+            rootNode.detachAllChildren();
+            geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
+            rootNode.attachChild(geometry.build());
+            syncCamera();
+            game.note("ENTERING " + currentMap);
+            System.out.println("advanced to " + level);
+        } catch (Exception e) {
+            game.note("cannot load " + next.mapName() + ": " + e.getMessage());
+        } finally {
+            advancing = false;
+        }
+    }
+
+    /** Weapons, ammunition, cards and energy survive a level change; level state does not. */
+    private static void copyInventory(citadel.core.Inventory from, citadel.core.Inventory to) {
+        System.arraycopy(from.owned, 0, to.owned, 0, from.owned.length);
+        System.arraycopy(from.condition, 0, to.condition, 0, from.condition.length);
+        System.arraycopy(from.ammo, 0, to.ammo, 0, from.ammo.length);
+        System.arraycopy(from.cards, 0, to.cards, 0, from.cards.length);
+        to.current = from.current;
+        to.energy = from.energy;
+        to.warhead = from.warhead;
+    }
+
+    private citadel.core.TextTable texts;
+
     private void serveAutoFire() {
         if (firing && game.inventory.current == MACHINEGUN) {
             game.fire();
@@ -231,6 +293,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
         serveAutoFire();
         game.update(fwd, strafe, turn, Math.min(tpf, 0.1f));
+
+        if (game.isLevelComplete() && !advancing) {
+            advancing = true;
+            advanceToNextLevel();
+        }
 
         if (game.consumeGeometryDirty()) {
             geometry.rebuild();

@@ -107,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 27 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 34 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -125,13 +125,34 @@ Done:
 - player weapons: hitscan fire, ammunition, weapon wear, per-species vulnerability mask
 - sound: 25 effects, positioned in the world for doors and enemies
 - intro animations decoded to PNG frames (IFF ANIM, op 5, Extra Half-Brite)
+- the ETAPY level sequence, with the inventory carried across levels
+- the original in-game messages, with their random variants
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
 - the on-screen counters and their timers (`Test_Counters`)
-- HUD proper, automap, compass, the menu and inventory layer (`SERVER`)
+- HUD proper, automap, compass, the menu, briefing and save screens (`SERVER`)
 - playing the intro in-game, and the death sequence
+
+## Campaign and text
+
+`Campaign` transcribes the server's `ETAPY` table: complex 1 is A and B, complexes 2 to 7 are A,
+B and C, complex 8 is A alone and then the game ends. That is 21 levels. Several maps ship that
+the sequence never visits — `LEVEL01T`, `LEVEL03K`, `LEVEL05D` and others — and they stay
+playable on their own.
+
+Reaching the exit cell loads the next map and carries weapons, ammunition, cards and energy
+across, which is what the server does by keeping them in `STRUCTURE` between levels.
+
+`TextTable` reads `Store/TEXT.ENG` (or `.POL`, `.GER`). The file is split by `@`, one block per
+message numbered from zero, and that numbering is exactly the `SCROLL` macro's argument. A block
+whose first line starts with `^` holds interchangeable lines the engine picks between at random,
+which is why walking into a wall insults you differently every time.
+
+Message numbers are verified against their call sites at 40, 41, 44, 52, 53, 54, 65 and 76. Pickup
+messages need no table of their own: every branch of `Take_Items` computes an index that works out
+to the item value itself.
 
 ## Enemies
 

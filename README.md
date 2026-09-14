@@ -45,11 +45,14 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
   vulnerability mask that makes some species immune to some damage types.
 - Sound: the 25 effects play, positioned in the world for doors and enemies.
 - The intro animations decode. The original README says they were lost; they are not.
+- The 21-level campaign runs end to end: reaching the exit loads the next map and carries your
+  inventory across, following the server's ETAPY table.
+- Messages are the original ones, random variants and all, read from `TEXT.ENG`.
 
 ## What is missing
 
 - Travelling projectiles (`Anim_Objects`): rocket splash damage and flame trails.
-- HUD proper, automap, compass, and the menu and inventory layer (`SERVER`).
+- HUD proper, automap and compass; the menu, briefing and save screens (`SERVER`).
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.
 

@@ -26,7 +26,7 @@ Conversion has to run once before the game: the viewer loads its textures from `
 while level data is read straight out of the original `.MAP` files.
 
 **Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall you are
-facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand. `M` toggles the automap.
+facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand. `M` toggles the automap. `F5` and `F9` save and load.
 
 ## What works
 
@@ -51,10 +51,11 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
 - Automap (press `M`), level clock, low-energy warning, and dying when energy runs out.
 - Projectiles fly: the flamer, bolter and launcher put real objects in the air, and a rocket
   detonates into a spray of fireballs the way the original does.
+- Quick save and load (`F5` / `F9`) writing the original 768 byte `Savegame.DAT` layout.
 
 ## What is missing
 
-- Compass and the original HUD layout; the menu, briefing and save screens (`SERVER`).
+- Compass and the original HUD layout; the menu and briefing screens (`SERVER`).
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.
 

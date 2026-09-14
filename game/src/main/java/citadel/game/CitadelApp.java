@@ -147,8 +147,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL),
                 new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
         inputManager.addMapping("map", new KeyTrigger(KeyInput.KEY_M));
+        inputManager.addMapping("save", new KeyTrigger(KeyInput.KEY_F5));
+        inputManager.addMapping("load", new KeyTrigger(KeyInput.KEY_F9));
         inputManager.addListener(this,
-                "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire", "map");
+                "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire", "map",
+                "save", "load");
 
         // 1..6 select a weapon, 0 goes back to the bare hand, as F1..F0 do in the original.
         int[] keys = {KeyInput.KEY_0, KeyInput.KEY_1, KeyInput.KEY_2, KeyInput.KEY_3,
@@ -183,6 +186,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             game.use();
         } else if ("map".equals(name) && pressed) {
             automap.toggle();
+        } else if ("save".equals(name) && pressed) {
+            quickSave();
+        } else if ("load".equals(name) && pressed) {
+            quickLoad();
         } else if ("fire".equals(name)) {
             firing = pressed;
             if (pressed) {
@@ -257,6 +264,63 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     }
 
     private citadel.core.TextTable texts;
+
+    /**
+     * Quick save and load, in the original 768 byte format so the file is the one the Amiga game
+     * would read. It is written beside the converted assets rather than into Data/, which is the
+     * pristine original and lives under version control.
+     */
+    private File saveFile() {
+        return new File(assets.assetRoot().getParentFile(), "Savegame.DAT");
+    }
+
+    private void quickSave() {
+        try {
+            File f = saveFile();
+            citadel.core.SaveGame save = f.isFile()
+                    ? citadel.core.SaveGame.load(f) : citadel.core.SaveGame.empty();
+            save.store(0, game, campaign, campaign.indexOf(currentMap), currentMap);
+            save.save(f);
+            game.note("SAVED");
+        } catch (Exception e) {
+            game.note("cannot save: " + e.getMessage());
+        }
+    }
+
+    private void quickLoad() {
+        File f = saveFile();
+        if (!f.isFile()) {
+            game.note("nothing saved yet");
+            return;
+        }
+        try {
+            citadel.core.SaveGame save = citadel.core.SaveGame.load(f);
+            if (save.isEmpty(0)) {
+                game.note("nothing saved yet");
+                return;
+            }
+            GameState probe = new GameState(level);
+            citadel.core.Campaign.Stage stage = save.restore(0, probe, campaign);
+            File map = campaign.file(assets.mapsDir(), stage);
+            if (map == null) {
+                game.note("missing map " + stage.mapName());
+                return;
+            }
+            level = Level.load(map);
+            currentMap = map.getName();
+            game = new GameState(level);
+            game.setTexts(texts);
+            save.restore(0, game, campaign);
+
+            rootNode.detachAllChildren();
+            geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
+            rootNode.attachChild(geometry.build());
+            syncCamera();
+            game.note("LOADED " + currentMap);
+        } catch (Exception e) {
+            game.note("cannot load: " + e.getMessage());
+        }
+    }
 
     private void serveAutoFire() {
         if (firing && game.inventory.current == MACHINEGUN) {

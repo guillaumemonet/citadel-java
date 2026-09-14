@@ -107,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 45 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 49 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -129,12 +129,29 @@ Done:
 - the original in-game messages, with their random variants
 - the level clock, low-energy warning, death, and the automap
 - projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
+- saving and loading in the original 768 byte Savegame.DAT format
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- compass and the original HUD layout; the menu, briefing and save screens (`SERVER`)
+- compass and the original HUD layout; the menu and briefing screens (`SERVER`)
 - playing the intro in-game, and the death sequence
+
+## Saves
+
+`Store/Savegame.DAT` is 768 bytes: the live state in the first 128, then five slots of 128. Each
+block is the engine's `STRUCTURE`, the record the server keeps at `$7f800` and hands to the game
+between levels. A slot carries a 16 byte name at +72, set to `WOLNE@` — Polish for "free" — when
+empty, with `@` terminating the string as it does in the text files.
+
+Offsets come from the engine's own load, which reads size, floor, details, energy and Glowica
+individually and then copies **18 words from +14** into `sv_GUNS`: six weapons of (condition,
+ammunition per pickup, ammunition). That is cross-checked against the shipped file, where
+-10, -5, -10, -5, -5 and -1 land exactly on those six per-pickup fields.
+
+`SaveGame` writes that layout byte for byte, so a save made by the port is a file the Amiga game
+would read. The test suite loads the shipped `Savegame.DAT` and asserts its five slots read as
+free and its head block starts at -150 energy.
 
 ## Campaign and text
 

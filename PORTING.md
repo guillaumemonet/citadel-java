@@ -86,6 +86,17 @@ once with a correct forward vector and every control mirrored. A rising angle sw
 east, south — clockwise seen from above — so turning right must **increase** it. `ControlsTest`
 checks each control against the compass rather than against the others.
 
+## Handedness
+
+The engine's plane is (X, Y) with Y north. jME's is (X, Z) with Z coming towards the viewer, which
+is its mirror image, so an angle that sweeps clockwise in the engine sweeps anticlockwise on
+screen. The turn input is negated at the boundary in `CitadelApp`, not in the rules, which stay
+tested against the engine's own compass.
+
+The camera must take its direction from `GameState.forwardX/forwardY` and nothing else. It once
+built its own `(cos a, sin a)` while movement used `(-cos a, sin a)`: they agree on Z and differ
+on X, so facing north or south felt fine and facing east or west walked you backwards.
+
 ## Two clocks
 
 The engine runs on two, and treating them as one makes the whole game run several times too fast.

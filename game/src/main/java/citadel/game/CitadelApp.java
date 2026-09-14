@@ -570,6 +570,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             if (autoStart && mode != Mode.PLAYING && (frame == 4 || frame == 8 || frame == 12)) {
                 handleFrontEndKey("confirm");
             }
+            // -Pwalk=N drives the player forward for N frames, so a shot can show where
+            // walking forward actually takes you rather than only where the camera points
+            String walk = System.getProperty("citadel.walk");
+            forward = walk != null && frame < Integer.parseInt(walk);
             if (frame == 20) {
                 shots.takeScreenshot();
             } else if (frame > 25) {
@@ -588,10 +592,15 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
         float fwd = (forward ? 1f : 0f) - (back ? 1f : 0f);
         float strafe = (right ? 1f : 0f) - (left ? 1f : 0f);
-        float turn = (turnRight ? 1f : 0f) - (turnLeft ? 1f : 0f) + mouseTurn;
+        // The engine's plane is (X, Y) with Y north; jME's is (X, Z) with Z coming towards the
+        // viewer, which is its mirror image. So an angle that sweeps clockwise in the engine
+        // sweeps anticlockwise on screen, and the turn input is negated here — at the boundary,
+        // where the handedness actually changes — rather than in the rules, which are tested
+        // against the engine's own compass.
+        float turn = -((turnRight ? 1f : 0f) - (turnLeft ? 1f : 0f) + mouseTurn);
         mouseTurn = 0f;
 
-        if (shots != null) {
+        if (shots != null && System.getProperty("citadel.walk") == null) {
             fwd = strafe = turn = 0f;   // no input on the verification path
         }
 
@@ -620,14 +629,21 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         updateHud();
     }
 
+    /**
+     * Points the camera along exactly the vector the player walks down.
+     *
+     * These must come from the same place. The camera used to build its own {@code (cos a, sin a)}
+     * while movement used the engine's {@code (-cos a, sin a)}; they agree on Z and differ on X,
+     * so facing north or south felt fine and facing east or west walked you backwards.
+     */
     private void syncCamera() {
         float scale = LevelGeometry.CELL / Level.CELL_UNITS;
         cam.setLocation(new Vector3f(game.posX * scale, EYE_HEIGHT, game.posY * scale));
-        float a = game.angleRadians();
+        float flat = FastMath.cos(pitch);
         Vector3f look = new Vector3f(
-                FastMath.cos(a) * FastMath.cos(pitch),
+                (float) GameState.forwardX(game.angle) * flat,
                 FastMath.sin(pitch),
-                FastMath.sin(a) * FastMath.cos(pitch));
+                (float) GameState.forwardY(game.angle) * flat);
         cam.lookAtDirection(look, Vector3f.UNIT_Y);
     }
 

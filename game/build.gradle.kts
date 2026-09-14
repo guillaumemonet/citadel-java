@@ -33,6 +33,7 @@ tasks.register<JavaExec>("shot") {
     systemProperty("citadel.data", rootProject.file("Data").absolutePath)
     systemProperty("citadel.screenshot", rootProject.file("build/shots").absolutePath + "/")
     (project.findProperty("screen") as String?)?.let { systemProperty("citadel.screen", it) }
+    (project.findProperty("walk") as String?)?.let { systemProperty("citadel.walk", it) }
     (project.findProperty("cam") as String?)?.let { systemProperty("citadel.cam", it) }
     (project.findProperty("at") as String?)?.let { systemProperty("citadel.at", it) }
     (project.findProperty("pace") as String?)?.let { systemProperty("citadel.pace", it) }

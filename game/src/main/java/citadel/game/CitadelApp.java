@@ -310,6 +310,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         geometry.syncDoors(game);
         geometry.syncEnemies(game);
+        geometry.syncProjectiles(game);
         automap.update(game);
         sound.serve(game);
         syncCamera();

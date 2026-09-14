@@ -298,6 +298,7 @@ public final class GameState {
         for (int i = 0; i < ticks; i++) {
             inventory.tick();
             moveEnemies();
+            updateProjectiles();
         }
     }
 
@@ -839,8 +840,133 @@ public final class GameState {
         return true;
     }
 
-    /** Frames an enemy waits between shots, standing in for a projectile's flight time. */
+    /**
+     * Frames an enemy waits between shots.
+     *
+     * The flamer, bolter and launcher now fire real projectiles whose flight time paces them on
+     * its own, but the handgun is hitscan in the original too, so a room of pistol-armed enemies
+     * would still empty an energy bar in seconds. This keeps them to a sane rate.
+     */
     public static final int ENEMY_RELOAD = 25;
+
+    /** Sub-steps a projectile is advanced in per frame, so it cannot skip over a target. */
+    private static final int PROJECTILE_SUBSTEPS = 4;
+
+    private final List<Projectile> projectiles = new ArrayList<Projectile>();
+
+    public List<Projectile> projectiles() {
+        return projectiles;
+    }
+
+    /**
+     * Anim_Objects: advance every object, age it, and resolve what it runs into. An object that
+     * hits nothing before its counter runs out simply disappears.
+     */
+    private void updateProjectiles() {
+        for (int i = projectiles.size() - 1; i >= 0; i--) {
+            Projectile p = projectiles.get(i);
+            p.anim ^= 1;
+            if (--p.life <= 0) {
+                projectiles.remove(i);
+                continue;
+            }
+            if (p.isEffect()) {
+                continue;   // impact marks and explosions just animate in place
+            }
+            if (!advanceProjectile(p)) {
+                projectiles.remove(i);
+            }
+        }
+    }
+
+    /** @return false when the projectile is spent and should be removed */
+    private boolean advanceProjectile(Projectile p) {
+        for (int s = 0; s < PROJECTILE_SUBSTEPS; s++) {
+            int nx = p.x + p.dx / PROJECTILE_SUBSTEPS;
+            int ny = p.y + p.dy / PROJECTILE_SUBSTEPS;
+            if (nx < 0 || ny < 0 || nx >= 64 * Level.CELL_UNITS || ny >= 64 * Level.CELL_UNITS) {
+                return false;
+            }
+            int cx = p.cellX(), cy = p.cellY();
+            int ncx = nx / Level.CELL_UNITS, ncy = ny / Level.CELL_UNITS;
+            if (ncx != cx && !level.isPassable(cx, cy, ncx > cx ? Level.EAST_DIR : Level.WEST_DIR)) {
+                return impact(p);
+            }
+            if (ncy != cy && !level.isPassable(ncx, cy, ncy > cy ? Level.NORTH_DIR : Level.SOUTH_DIR)) {
+                return impact(p);
+            }
+            p.x = nx;
+            p.y = ny;
+
+            if (!p.fromPlayer
+                    && Math.abs(posX - p.x) < Enemy.RADIUS && Math.abs(posY - p.y) < Enemy.RADIUS) {
+                hitPlayer(p);
+                return impact(p);
+            }
+            Enemy hit = enemyNear(p.x, p.y, p.ownerSlot);
+            if (hit != null) {
+                hitEnemy(hit, p.type);
+                return impact(p);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * What an object turns into when it lands. A rocket detonates, which ro_SetExplode does by
+     * replacing it with an explosion mark and throwing eight fireballs outwards — the splash
+     * damage is those fireballs, not a radius check.
+     *
+     * @return false, so the caller removes the original object
+     */
+    private boolean impact(Projectile p) {
+        if (p.type == Projectile.ROCKET) {
+            explode(p.x, p.y);
+        } else {
+            projectiles.add(new Projectile(
+                    p.type == Projectile.ELECTRIC ? Projectile.DISCHARGE : Projectile.IMPACT,
+                    p.x, p.y));
+        }
+        return false;
+    }
+
+    /** ro_DirTab: four cardinal directions then four diagonals, all at projectile speed. */
+    private void explode(int x, int y) {
+        projectiles.add(new Projectile(Projectile.EXPLOSION, x, y));
+        playSoundAt(SoundTable.EXPLODE, x, y);
+        for (int i = 0; i < 8; i++) {
+            Projectile f = new Projectile(Projectile.FIREBALL, x, y, i * 64, -1, false);
+            projectiles.add(f);
+        }
+    }
+
+    private void hitPlayer(Projectile p) {
+        int damage = SHOT_DAMAGE[Math.min(p.type, SHOT_DAMAGE.length - 1)];
+        inventory.hurt(damage);
+        playSound(SoundTable.PLAYER_HURT);
+        log.add(text(72, "hit for " + damage));
+    }
+
+    private Enemy enemyNear(int x, int y, int exceptSlot) {
+        for (Enemy e : enemies) {
+            if (e.isDead() || e.slot == exceptSlot) {
+                continue;
+            }
+            if (Math.abs(e.x - x) < Enemy.RADIUS && Math.abs(e.y - y) < Enemy.RADIUS) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    /** Puts an object into flight, as the flamer, bolter and launcher branches do. */
+    private void spawnProjectile(int type, int x, int y, int angle, int ownerSlot,
+                                 boolean fromPlayer) {
+        if (projectiles.size() >= 30) {
+            return;   // the engine's table is 30 slots and simply drops the shot when full
+        }
+        projectiles.add(new Projectile(type, x, y, angle, ownerSlot, fromPlayer));
+    }
 
     /**
      * An enemy shot landing on the player. oc_PlayerHit uses the same damage table as
@@ -853,11 +979,19 @@ public final class GameState {
      */
     private void fire(Enemy e) {
         e.reload = ENEMY_RELOAD;
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
+        int type = enemyShotType(stats.weapon);
+        playSoundAt(SoundTable.fireSound(Math.max(1, stats.weapon)), e.x, e.y);
+
+        if (type != SHOT_BULLET) {
+            spawnProjectile(type, e.x, e.y, e.angle, e.slot, false);
+            return;
+        }
+        // es_HandGun resolves at once, like the player's
         if (!canShoot(e.x, e.y, posX, posY)) {
             return;
         }
-        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
-        int damage = SHOT_DAMAGE[enemyShotType(stats.weapon)];
+        int damage = SHOT_DAMAGE[type];
         inventory.hurt(damage);
         playSound(SoundTable.PLAYER_HURT);
         log.add(text(72, "hit for " + damage));
@@ -998,6 +1132,12 @@ public final class GameState {
         playSound(SoundTable.fireSound(w));
 
         int type = WEAPON_SHOT[w];
+        if (type != SHOT_BULLET) {
+            // flamer, bolter and launcher put an object into sv_ObjectTab instead of resolving now
+            spawnProjectile(type, posX, posY, angle, 0, true);
+            return true;
+        }
+
         int pellets = WEAPON_PELLETS[w];
         int hits = 0;
         for (int i = 0; i < pellets; i++) {
@@ -1044,25 +1184,13 @@ public final class GameState {
                 }
                 cy = ncy;
             }
-            Enemy hit = enemyNear((int) x, (int) y);
+            Enemy hit = enemyNear((int) x, (int) y, -1);
             if (hit != null) {
                 hitEnemy(hit, type);
                 return true;
             }
         }
         return false;
-    }
-
-    private Enemy enemyNear(int x, int y) {
-        for (Enemy e : enemies) {
-            if (e.isDead()) {
-                continue;
-            }
-            if (Math.abs(e.x - x) < Enemy.RADIUS && Math.abs(e.y - y) < Enemy.RADIUS) {
-                return e;
-            }
-        }
-        return null;
     }
 
     /**

@@ -66,6 +66,7 @@ public final class LevelGeometry {
         doorFaces.clear();
         enemyViews.clear();
         enemyNode = null;
+        projectileNode = null;
         root.attachChild(buildWalls());
         root.attachChild(buildFloorAndCeiling(reachableCells()));
         root.attachChild(buildSprites());
@@ -93,6 +94,43 @@ public final class LevelGeometry {
             if (Level.inside(nx, ny)) {
                 raise(nx, ny, Level.OPPOSITE[slot.dir()], lift);
             }
+        }
+    }
+
+    /** Billboards for objects in flight, rebuilt each frame since they are few and short-lived. */
+    private Node projectileNode;
+
+    /**
+     * Draws the contents of the object table. Sprite choice is provisional: the in-flight sprites
+     * sit in tiles 70 and 71 and their exact sizes are not settled, so each type is mapped onto a
+     * plausible object sprite rather than the frame the engine would pick.
+     */
+    public void syncProjectiles(citadel.core.GameState game) {
+        if (projectileNode == null) {
+            projectileNode = new Node("projectiles");
+            root.attachChild(projectileNode);
+        }
+        projectileNode.detachAllChildren();
+        for (citadel.core.Projectile p : game.projectiles()) {
+            int sprite = spriteFor(p);
+            if (!assets.exists(complex, "object", sprite)) {
+                continue;
+            }
+            float size = (p.type == citadel.core.Projectile.EXPLOSION) ? 0.7f : 0.35f;
+            addSpriteAt(projectileNode, "object", sprite,
+                    p.x / (float) Level.CELL_UNITS, p.y / (float) Level.CELL_UNITS,
+                    size, size, WALL_H / 2f, "shot");
+        }
+    }
+
+    private static int spriteFor(citadel.core.Projectile p) {
+        switch (p.type) {
+            case citadel.core.Projectile.FIREBALL:  return 4 + (p.anim & 1);
+            case citadel.core.Projectile.ELECTRIC:  return 6 + (p.anim & 1);
+            case citadel.core.Projectile.ROCKET:    return 8 + (p.anim & 1);
+            case citadel.core.Projectile.EXPLOSION: return 12;
+            case citadel.core.Projectile.DISCHARGE: return 2;
+            default:                                return 0;
         }
     }
 

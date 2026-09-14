@@ -49,10 +49,11 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
   inventory across, following the server's ETAPY table.
 - Messages are the original ones, random variants and all, read from `TEXT.ENG`.
 - Automap (press `M`), level clock, low-energy warning, and dying when energy runs out.
+- Projectiles fly: the flamer, bolter and launcher put real objects in the air, and a rocket
+  detonates into a spray of fireballs the way the original does.
 
 ## What is missing
 
-- Travelling projectiles (`Anim_Objects`): rocket splash damage and flame trails.
 - Compass and the original HUD layout; the menu, briefing and save screens (`SERVER`).
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.

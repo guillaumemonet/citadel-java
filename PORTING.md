@@ -107,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 39 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 45 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -128,6 +128,7 @@ Done:
 - the ETAPY level sequence, with the inventory carried across levels
 - the original in-game messages, with their random variants
 - the level clock, low-energy warning, death, and the automap
+- projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
 - playable viewer, plus a screenshot path for verification
 
 Not started:
@@ -153,6 +154,20 @@ which is why walking into a wall insults you differently every time.
 Message numbers are verified against their call sites at 40, 41, 44, 52, 53, 54, 65 and 76. Pickup
 messages need no table of their own: every branch of `Take_Items` computes an index that works out
 to the item value itself.
+
+## Projectiles
+
+`Anim_Objects` walks a table of 30 slots. Types 3, 4 and 5 are the fireball, electricity and
+rocket; 1, 2 and 6 are the brief impact, discharge and explosion marks. The handgun, shotgun and
+machinegun are not in there at all — they resolve in the frame the trigger is pulled.
+
+Speeds are written as `400/8` and `600/8` and an object advances eight steps a frame, so the real
+figures are 400 and 600 units. That reading checks out at both ends: the handgun's 20-step hitscan
+reaches the 8000 units its own comment claims, and all three projectile types come out with an
+identical 12 cell range against their lifetimes (30, 20 and 20 frames).
+
+A rocket has no splash radius. `ro_SetExplode` swaps it for an explosion mark and throws eight
+fireballs outwards along `ro_DirTab`, and those are the splash damage.
 
 ## Counters and the automap
 
@@ -210,10 +225,9 @@ A fireball that finishes an enemy leaves it burning rather than simply dead. Wea
 Known gaps:
 
 - in-flight object sprites (projectiles, flames, explosions) have provisional sizes
-- no travelling projectiles, so no rocket splash damage (`ro_SetExplode`) and no flame trail
 - knockback is decoded (enemy bytes 14/15) but not applied
-- enemy shots apply damage directly rather than spawning an object, so they are given a 25 frame
-  reload to stand in for a projectile's flight time
+- enemy handguns are hitscan in the original too, so those enemies get a 25 frame reload to keep
+  a roomful of them from emptying an energy bar in seconds
 - wall plaques and blood decals are decoded but not yet drawn
 - card readers are parsed and can be fired, but nothing checks whether you hold the card
 - switch commands tagged "on release" are parsed and skipped; they need a held-button model

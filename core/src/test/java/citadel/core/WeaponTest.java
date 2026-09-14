@@ -144,9 +144,13 @@ class WeaponTest {
         game.posY = victim.y - (int) Math.round(GameState.forwardY(game.angle) * 400);
         int energy = victim.energy;
         game.fire();
+        // the bolter fires a travelling object now, so let it reach the target
+        for (int i = 0; i < 5; i++) {
+            game.update(0, 0, 0, 1f / 50f);
+        }
 
         if (shocks) {
-            assertTrue(victim.energy < energy);
+            assertTrue(victim.energy < energy, "the bolt never landed");
         } else {
             assertEquals(energy, victim.energy, "damage landed despite the vulnerability mask");
         }

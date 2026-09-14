@@ -22,8 +22,10 @@ import com.jme3.math.Vector3f;
 import com.jme3.system.AppSettings;
 
 /**
- * Playable viewer for a converted Citadel level: walk around with the original engine's movement
- * and collision rules, open doors, press switches, take teleports.
+ * The game: intro, title screen, play, and the end cards.
+ *
+ * The original is three programs chained by a loader -- an intro player, a server holding the
+ * menus, and the engine. Here they are modes of one application.
  *
  * <pre>
  *   gradle :game:run                      loads LEVEL01A
@@ -31,7 +33,8 @@ import com.jme3.system.AppSettings;
  * </pre>
  *
  * Controls: the mouse turns, W/S walk, A/D strafe, left mouse or Ctrl fires, E or right mouse
- * uses the wall you are facing, 1..6 pick a weapon and 0 goes back to the bare hand.
+ * uses the wall you are facing, 1..6 pick a weapon, 0 the bare hand, M toggles the automap,
+ * F5 and F9 save and load, ENTER answers the front-end screens.
  */
 public final class CitadelApp extends SimpleApplication implements ActionListener, AnalogListener {
 
@@ -123,6 +126,19 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         guiNode.attachChild(compass.picture());
         syncCamera();
 
+        screens = new Screens(assetManager, guiNode,
+                assetManager.loadFont("Interface/Fonts/Default.fnt"),
+                assets.assetRoot(), cam.getWidth(), cam.getHeight());
+        // the verification paths want the world straight away, not the front end
+        String want = System.getProperty("citadel.screen");
+        boolean skipFrontEnd = (System.getProperty("citadel.screenshot") != null && want == null)
+                || System.getProperty("citadel.at") != null;
+        enter(skipFrontEnd ? Mode.PLAYING
+                : "title".equals(want) ? Mode.TITLE
+                : "dead".equals(want) ? Mode.DEAD
+                : "victory".equals(want) ? Mode.VICTORY
+                : (screens.hasIntro() ? Mode.INTRO : Mode.TITLE));
+
         String shotDir = System.getProperty("citadel.screenshot");
         if (shotDir != null) {
             shots = new ScreenshotAppState(shotDir, requested, 0);
@@ -153,9 +169,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         inputManager.addMapping("map", new KeyTrigger(KeyInput.KEY_M));
         inputManager.addMapping("save", new KeyTrigger(KeyInput.KEY_F5));
         inputManager.addMapping("load", new KeyTrigger(KeyInput.KEY_F9));
+        inputManager.addMapping("confirm", new KeyTrigger(KeyInput.KEY_RETURN),
+                new KeyTrigger(KeyInput.KEY_NUMPADENTER));
         inputManager.addListener(this,
                 "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire", "map",
-                "save", "load");
+                "save", "load", "confirm");
 
         // 1..6 select a weapon, 0 goes back to the bare hand, as F1..F0 do in the original.
         int[] keys = {KeyInput.KEY_0, KeyInput.KEY_1, KeyInput.KEY_2, KeyInput.KEY_3,
@@ -174,6 +192,12 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     @Override
     public void onAction(String name, boolean pressed, float tpf) {
+        if (mode != Mode.PLAYING) {
+            if (pressed) {
+                handleFrontEndKey(name);
+            }
+            return;
+        }
         if ("fwd".equals(name)) {
             forward = pressed;
         } else if ("back".equals(name)) {
@@ -226,7 +250,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private void advanceToNextLevel() {
         citadel.core.Campaign.Stage next = campaign.next(currentMap);
         if (next == null) {
-            game.note("THE CITADEL HAS FALLEN");
+            advancing = false;
+            enter(Mode.VICTORY);
             return;
         }
         File f = campaign.file(assets.mapsDir(), next);
@@ -268,6 +293,101 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     }
 
     private citadel.core.TextTable texts;
+
+    /**
+     * What the application is doing. The original is three programs — an intro player, a server
+     * with the menus, and the game engine — chained by the loader; here they are states.
+     */
+    private enum Mode { INTRO, TITLE, PLAYING, DEAD, VICTORY }
+
+    private Mode mode = Mode.PLAYING;
+    private Screens screens;
+
+    private void enter(Mode next) {
+        mode = next;
+        switch (next) {
+            case INTRO:
+                screens.startIntro();
+                break;
+            case TITLE:
+                screens.showTitle("ENTER to begin    F9 to load a saved game    ESC to quit");
+                break;
+            case DEAD:
+                screens.showMessage(textOr(39, "YOU ARE DEAD")
+                        + "\n\nENTER to restart the level    F9 to load");
+                break;
+            case VICTORY:
+                screens.showMessage("THE CITADEL HAS FALLEN\n\nENTER to return to the title");
+                break;
+            default:
+                screens.hide();
+                break;
+        }
+        inputManager.setCursorVisible(next != Mode.PLAYING);
+        boolean inGame = next == Mode.PLAYING;
+        setHudVisible(inGame);
+    }
+
+    /** The in-game overlays only belong on screen while the world is up. */
+    private void setHudVisible(boolean visible) {
+        com.jme3.scene.Spatial.CullHint hint = visible
+                ? com.jme3.scene.Spatial.CullHint.Never
+                : com.jme3.scene.Spatial.CullHint.Always;
+        if (hud != null) {
+            hud.setCullHint(hint);
+        }
+        if (compass != null) {
+            compass.picture().setCullHint(hint);
+        }
+        if (automap != null && (!visible || automap.isVisible())) {
+            automap.picture().setCullHint(hint);
+        }
+    }
+
+    private String textOr(int index, String fallback) {
+        return (texts != null && !texts.get(index).isEmpty()) ? texts.get(index) : fallback;
+    }
+
+    /** Keys the title and end cards answer to. Everything else is ignored while they are up. */
+    private void handleFrontEndKey(String name) {
+        if ("confirm".equals(name)) {
+            switch (mode) {
+                case INTRO:
+                    enter(Mode.TITLE);      // let the player skip the animation
+                    break;
+                case DEAD:
+                    restartLevel();
+                    break;
+                case VICTORY:
+                    enter(Mode.TITLE);
+                    break;
+                default:
+                    enter(Mode.PLAYING);
+                    break;
+            }
+        } else if ("load".equals(name)) {
+            quickLoad();
+            if (!game.isPlayerDead()) {
+                enter(Mode.PLAYING);
+            }
+        }
+    }
+
+    /** Restarts the current map from its spawn, keeping nothing but the campaign position. */
+    private void restartLevel() {
+        try {
+            level = Level.load(new File(assets.mapsDir(), currentMap));
+            game = new GameState(level);
+            game.setTexts(texts);
+            rootNode.detachAllChildren();
+            geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
+            rootNode.attachChild(geometry.build());
+            syncCamera();
+        } catch (Exception e) {
+            System.out.println("cannot restart: " + e.getMessage());
+        }
+        enter(Mode.PLAYING);
+    }
 
     /**
      * Quick save and load, in the original 768 byte format so the file is the one the Amiga game
@@ -349,14 +469,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     @Override
     public void simpleUpdate(float tpf) {
-        float fwd = (forward ? 1f : 0f) - (back ? 1f : 0f);
-        float strafe = (right ? 1f : 0f) - (left ? 1f : 0f);
-        float turn = (turnRight ? 1f : 0f) - (turnLeft ? 1f : 0f) + mouseTurn;
-        mouseTurn = 0f;
-
         if (shots != null) {
-            // verification path: no input, but the world still ticks so doors finish opening
-            fwd = strafe = turn = 0f;
+            // verification path: render a few frames, save one, and quit whatever the mode
             frame++;
             if (frame == 20) {
                 shots.takeScreenshot();
@@ -364,10 +478,32 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 stop();
             }
         }
+        if (mode == Mode.INTRO) {
+            if (screens.advanceIntro(tpf)) {
+                enter(Mode.TITLE);
+            }
+            return;
+        }
+        if (mode != Mode.PLAYING) {
+            return;   // title and the end cards wait on a key
+        }
+
+        float fwd = (forward ? 1f : 0f) - (back ? 1f : 0f);
+        float strafe = (right ? 1f : 0f) - (left ? 1f : 0f);
+        float turn = (turnRight ? 1f : 0f) - (turnLeft ? 1f : 0f) + mouseTurn;
+        mouseTurn = 0f;
+
+        if (shots != null) {
+            fwd = strafe = turn = 0f;   // no input on the verification path
+        }
 
         serveAutoFire();
         game.update(fwd, strafe, turn, Math.min(tpf, 0.1f));
 
+        if (game.isPlayerDead()) {
+            enter(Mode.DEAD);
+            return;
+        }
         if (game.isLevelComplete() && !advancing) {
             advancing = true;
             advanceToNextLevel();

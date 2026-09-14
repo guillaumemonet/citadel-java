@@ -53,10 +53,12 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
   detonates into a spray of fireballs the way the original does.
 - Quick save and load (`F5` / `F9`) writing the original 768 byte `Savegame.DAT` layout.
 - Compass needle, drawn the way the COMPASS routine does.
+- A front end: the intro animation plays into a title screen, and dying or finishing the campaign
+  gets you a card rather than a stuck world.
 
 ## What is missing
 
-- The original HUD layout; the menu and briefing screens (`SERVER`).
+- The original HUD layout, the briefing screens and the save-slot menu (`SERVER`).
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.
 

@@ -34,6 +34,7 @@ Useful while debugging:
 ```sh
 gradle :game:shot -Plevel=LEVEL03C            # render one frame to build/shots
 gradle :game:shot -Pcam=top                   # top-down, to compare against maps/*.png
+gradle :game:shot -Pscreen=title              # render a front-end screen instead of the world
 gradle :tools:inspect -Pargs="../Data/GAME/MAPS/LEVEL01A.MAP 24 7"
 ```
 
@@ -131,12 +132,12 @@ Done:
 - projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
 - saving and loading in the original 768 byte Savegame.DAT format
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
+- front end: the intro animation plays, then a title screen, with death and victory cards
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the original HUD layout; the menu and briefing screens (`SERVER`)
-- playing the intro in-game, and the death sequence
+- the original HUD layout, the briefing screens, and the save-slot menu (`SERVER`)
 
 ## Saves
 

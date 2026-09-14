@@ -133,11 +133,12 @@ Done:
 - saving and loading in the original 768 byte Savegame.DAT format
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
 - front end: the intro animation plays, then a title screen, with death and victory cards
+- the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the original HUD layout, the briefing screens, and the save-slot menu (`SERVER`)
+- the original HUD layout and the briefing screens (`SERVER`)
 
 ## Saves
 
@@ -150,6 +151,10 @@ Offsets come from the engine's own load, which reads size, floor, details, energ
 individually and then copies **18 words from +14** into `sv_GUNS`: six weapons of (condition,
 ammunition per pickup, ammunition). That is cross-checked against the shipped file, where
 -10, -5, -10, -5, -5 and -1 land exactly on those six per-pickup fields.
+
+The front end drives it through a five-slot picker: `F5` saves, `F9` loads, W/S or the arrows
+choose, ENTER confirms and E backs out. Each row shows the name, the complex and sub-level, and
+the energy the save was made with.
 
 `SaveGame` writes that layout byte for byte, so a save made by the port is a file the Amiga game
 would read. The test suite loads the shipped `Savegame.DAT` and asserts its five slots read as

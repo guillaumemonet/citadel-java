@@ -138,6 +138,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 : "dead".equals(want) ? Mode.DEAD
                 : "victory".equals(want) ? Mode.VICTORY
                 : (screens.hasIntro() ? Mode.INTRO : Mode.TITLE));
+        if ("slots".equals(want)) {
+            openSlots(SlotAction.LOAD, Mode.TITLE);
+        }
 
         String shotDir = System.getProperty("citadel.screenshot");
         if (shotDir != null) {
@@ -215,9 +218,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         } else if ("map".equals(name) && pressed) {
             automap.toggle();
         } else if ("save".equals(name) && pressed) {
-            quickSave();
+            openSlots(SlotAction.SAVE, Mode.PLAYING);
         } else if ("load".equals(name) && pressed) {
-            quickLoad();
+            openSlots(SlotAction.LOAD, Mode.PLAYING);
         } else if ("fire".equals(name)) {
             firing = pressed;
             if (pressed) {
@@ -298,7 +301,72 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
      * What the application is doing. The original is three programs — an intro player, a server
      * with the menus, and the game engine — chained by the loader; here they are states.
      */
-    private enum Mode { INTRO, TITLE, PLAYING, DEAD, VICTORY }
+    private enum Mode { INTRO, TITLE, PLAYING, DEAD, VICTORY, SLOTS }
+
+    /** Which way the slot picker is pointing. */
+    private enum SlotAction { SAVE, LOAD }
+
+    private SlotAction slotAction = SlotAction.LOAD;
+    private int slotIndex;
+    /** The mode to fall back to when the picker is dismissed. */
+    private Mode slotReturn = Mode.TITLE;
+
+    private void openSlots(SlotAction action, Mode back) {
+        slotAction = action;
+        slotReturn = back;
+        slotIndex = 0;
+        mode = Mode.SLOTS;
+        setHudVisible(false);
+        inputManager.setCursorVisible(true);
+        paintSlots();
+    }
+
+    /** Reads the file fresh each time, so the list always reflects what is on disk. */
+    private citadel.core.SaveGame slots() {
+        File f = saveFile();
+        try {
+            return f.isFile() ? citadel.core.SaveGame.load(f) : citadel.core.SaveGame.empty();
+        } catch (Exception e) {
+            return citadel.core.SaveGame.empty();
+        }
+    }
+
+    private void paintSlots() {
+        citadel.core.SaveGame save = slots();
+        List<String> lines = new java.util.ArrayList<String>();
+        for (int i = 0; i < citadel.core.SaveGame.SLOT_COUNT; i++) {
+            if (save.isEmpty(i)) {
+                lines.add(String.format("%d.  - free -", i + 1));
+            } else {
+                lines.add(String.format("%d.  %-16s  complex %d-%c   energy %d",
+                        i + 1, save.name(i), save.complex(i),
+                        (char) ('A' + save.levelIndex(i)), -save.energy(i)));
+            }
+        }
+        screens.showList(
+                slotAction == SlotAction.SAVE ? "SAVE GAME" : "LOAD GAME",
+                lines, slotIndex,
+                "W/S or arrows to choose    ENTER to confirm    E to go back");
+    }
+
+    private void confirmSlot() {
+        citadel.core.SaveGame save = slots();
+        if (slotAction == SlotAction.SAVE) {
+            try {
+                save.store(slotIndex, game, campaign, campaign.indexOf(currentMap),
+                        currentMap.replace(".MAP", ""));
+                save.save(saveFile());
+            } catch (Exception e) {
+                System.out.println("cannot save: " + e.getMessage());
+            }
+            enter(slotReturn);
+            return;
+        }
+        if (save.isEmpty(slotIndex)) {
+            return;   // nothing to load; stay on the picker
+        }
+        loadFromSlot(save, slotIndex);
+    }
 
     private Mode mode = Mode.PLAYING;
     private Screens screens;
@@ -348,8 +416,24 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         return (texts != null && !texts.get(index).isEmpty()) ? texts.get(index) : fallback;
     }
 
-    /** Keys the title and end cards answer to. Everything else is ignored while they are up. */
+    /** Keys the front-end screens answer to. Everything else is ignored while they are up. */
     private void handleFrontEndKey(String name) {
+        if (mode == Mode.SLOTS) {
+            if ("fwd".equals(name)) {
+                slotIndex = (slotIndex + citadel.core.SaveGame.SLOT_COUNT - 1)
+                        % citadel.core.SaveGame.SLOT_COUNT;
+                paintSlots();
+            } else if ("back".equals(name)) {
+                slotIndex = (slotIndex + 1) % citadel.core.SaveGame.SLOT_COUNT;
+                paintSlots();
+            } else if ("confirm".equals(name)) {
+                confirmSlot();
+            } else if ("use".equals(name)) {
+                enter(slotReturn);
+            }
+            return;
+        }
+
         if ("confirm".equals(name)) {
             switch (mode) {
                 case INTRO:
@@ -366,10 +450,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                     break;
             }
         } else if ("load".equals(name)) {
-            quickLoad();
-            if (!game.isPlayerDead()) {
-                enter(Mode.PLAYING);
-            }
+            openSlots(SlotAction.LOAD, mode);
         }
     }
 
@@ -398,33 +479,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         return new File(assets.assetRoot().getParentFile(), "Savegame.DAT");
     }
 
-    private void quickSave() {
+    /** Restores one slot: loads its map, rebuilds the world, and puts the inventory back. */
+    private void loadFromSlot(citadel.core.SaveGame save, int slot) {
         try {
-            File f = saveFile();
-            citadel.core.SaveGame save = f.isFile()
-                    ? citadel.core.SaveGame.load(f) : citadel.core.SaveGame.empty();
-            save.store(0, game, campaign, campaign.indexOf(currentMap), currentMap);
-            save.save(f);
-            game.note("SAVED");
-        } catch (Exception e) {
-            game.note("cannot save: " + e.getMessage());
-        }
-    }
-
-    private void quickLoad() {
-        File f = saveFile();
-        if (!f.isFile()) {
-            game.note("nothing saved yet");
-            return;
-        }
-        try {
-            citadel.core.SaveGame save = citadel.core.SaveGame.load(f);
-            if (save.isEmpty(0)) {
-                game.note("nothing saved yet");
-                return;
-            }
             GameState probe = new GameState(level);
-            citadel.core.Campaign.Stage stage = save.restore(0, probe, campaign);
+            citadel.core.Campaign.Stage stage = save.restore(slot, probe, campaign);
             File map = campaign.file(assets.mapsDir(), stage);
             if (map == null) {
                 game.note("missing map " + stage.mapName());
@@ -434,12 +493,13 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             currentMap = map.getName();
             game = new GameState(level);
             game.setTexts(texts);
-            save.restore(0, game, campaign);
+            save.restore(slot, game, campaign);
 
             rootNode.detachAllChildren();
             geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
             rootNode.attachChild(geometry.build());
             syncCamera();
+            enter(Mode.PLAYING);
             game.note("LOADED " + currentMap);
         } catch (Exception e) {
             game.note("cannot load: " + e.getMessage());

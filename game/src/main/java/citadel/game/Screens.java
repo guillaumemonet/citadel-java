@@ -14,6 +14,7 @@ import com.jme3.scene.Node;
 import com.jme3.scene.Spatial;
 import com.jme3.texture.Texture;
 import com.jme3.ui.Picture;
+import com.jme3.util.BufferUtils;
 
 /**
  * The full-screen screens that bracket play: the intro animation, the title, and the end-of-game
@@ -126,10 +127,24 @@ public final class Screens {
         show(null, text);
     }
 
+    /**
+     * A list with one entry marked, used for the five save slots. Drawn in a monospaced-ish block
+     * over black, which is as close as this gets to the server's own slot picker.
+     */
+    public void showList(String heading, List<String> entries, int selected, String prompt) {
+        StringBuilder sb = new StringBuilder(heading).append("\n\n");
+        for (int i = 0; i < entries.size(); i++) {
+            sb.append(i == selected ? " > " : "   ").append(entries.get(i)).append('\n');
+        }
+        sb.append('\n').append(prompt);
+        show(null, sb.toString());
+    }
+
     public void hide() {
         showing = false;
         picture.removeFromParent();
         caption.removeFromParent();
+        showDim(false);
     }
 
     private String firstExisting(String... paths) {
@@ -141,8 +156,36 @@ public final class Screens {
         return null;
     }
 
+    /** A flat panel behind text-only screens, so a menu is not read against the level. */
+    private Picture dim;
+
+    private void showDim(boolean on) {
+        if (!on) {
+            if (dim != null) {
+                dim.removeFromParent();
+            }
+            return;
+        }
+        if (dim == null) {
+            com.jme3.texture.Image img = new com.jme3.texture.Image(
+                    com.jme3.texture.Image.Format.RGBA8, 1, 1,
+                    BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xd8}),
+                    com.jme3.texture.image.ColorSpace.Linear);
+            dim = new Picture("dim");
+            dim.setTexture(assetManager, new com.jme3.texture.Texture2D(img), true);
+            dim.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
+            dim.setWidth(width);
+            dim.setHeight(height);
+            dim.setPosition(0, 0);
+        }
+        if (dim.getParent() == null) {
+            gui.attachChild(dim);
+        }
+    }
+
     private void show(String texturePath, String text) {
         showing = true;
+        showDim(texturePath == null && text != null && !text.isEmpty());
         if (texturePath != null) {
             try {
                 TextureKey key = new TextureKey(texturePath, true);
@@ -167,10 +210,12 @@ public final class Screens {
             return;
         }
         caption.setText(text);
-        caption.setLocalTranslation(
-                (width - caption.getLineWidth()) / 2f,
-                caption.getLineHeight() * (caption.getLineCount() + 1) + height * 0.06f,
-                1f);
+        // A single line sits low, over artwork; a block is centred, since it is the screen itself.
+        float block = caption.getLineHeight() * caption.getLineCount();
+        float y = (caption.getLineCount() > 1)
+                ? (height + block) / 2f
+                : block + height * 0.06f;
+        caption.setLocalTranslation((width - caption.getLineWidth()) / 2f, y, 1f);
         if (caption.getParent() == null) {
             gui.attachChild(caption);
         }

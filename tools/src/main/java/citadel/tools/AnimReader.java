@@ -31,6 +31,8 @@ public final class AnimReader {
     public final int[] palette;
     private final List<byte[]> frames = new ArrayList<byte[]>();
 
+    public boolean ham;
+
     private AnimReader(int width, int height, int planes, int[] palette) {
         this.width = width;
         this.height = height;
@@ -47,8 +49,12 @@ public final class AnimReader {
         BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         int[] line = new int[width];
         for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                line[x] = palette[idx[y * width + x] & 0xff];
+            if (ham) {
+                Hold.decodeRow(idx, y * width, width, palette, planes, line);
+            } else {
+                for (int x = 0; x < width; x++) {
+                    line[x] = palette[idx[y * width + x] & 0xff];
+                }
             }
             img.setRGB(0, y, width, 1, line, 0, width);
         }
@@ -64,6 +70,7 @@ public final class AnimReader {
         int w = 0, h = 0, planes = 0, compression = 0, masking = 0;
         int cmapEntries = 0;
         int camg = 0;
+        boolean hamMode = false;
         int[] pal = new int[256];
         AnimReader anim = null;
         byte[] current = null;   // planar bitmap of the frame being built
@@ -115,13 +122,17 @@ public final class AnimReader {
             } else if ("ANHD".equals(id)) {
                 lastOperation = Io.u8(d, payload);
             } else if ("BODY".equals(id)) {
-                expandHalfBrite(pal, cmapEntries, planes, camg);
+                if (!Hold.isHam(camg, planes)) {
+                    expandHalfBrite(pal, cmapEntries, planes, camg);
+                }
+                hamMode = Hold.isHam(camg, planes);
                 int used = readBody(d, payload, len, current, rowBytes, totalPlanes, h, compression);
                 if (System.getProperty("iff.verbose") != null) {
                     System.out.printf("  BODY consumed %d of %d bytes, buffer %d%n",
                             used, len, current.length);
                 }
                 anim = ensure(anim, w, h, planes, pal);
+                anim.ham = hamMode;
                 anim.frames.add(toChunky(current, w, h, rowBytes, planes, totalPlanes));
             } else if ("DLTA".equals(id)) {
                 if (lastOperation != 5) {
@@ -145,14 +156,12 @@ public final class AnimReader {
     }
 
     /**
-     * Fills in the Extra Half-Brite half of the palette.
+     * Fills in the Extra Half-Brite half of the palette, where a file asks for it.
      *
-     * These files carry six bitplanes but only 32 CMAP entries, because EHB derives the top 32
-     * colours from the bottom 32 at half brightness. Without this the whole upper half of the
-     * palette reads as black, which is exactly what a first decode looks like.
-     *
-     * The CAMG bit (0x80) states it, but a short CMAP against six planes is decisive on its own,
-     * so accept either.
+     * EHB derives the top 32 colours from the bottom 32 at half brightness, so a six-plane image
+     * with a 32-entry CMAP needs them filled in. None of this game's artwork actually uses it --
+     * the intro files looked like candidates until CAMG turned out to say Hold-and-Modify instead
+     * -- but the check is cheap and correct, so it stays for anything that does.
      */
     static void expandHalfBrite(int[] pal, int cmapEntries, int planes, int camg) {
         boolean ehb = (camg & 0x80) != 0

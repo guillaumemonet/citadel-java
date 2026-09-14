@@ -118,8 +118,8 @@ public final class Screens {
     /** The title card, with whatever prompt the caller wants under it. */
     public void showTitle(String prompt) {
         show(firstExisting(
-                "intro/art/Plansza_Tytulowa.iff.png",
                 "intro/art/CITADEL_title_ENG.iff.png",
+                "intro/art/Plansza_Tytulowa.iff.png",
                 "intro/art/Winieta_EngCover.iff.png"), prompt);
     }
 

@@ -203,19 +203,23 @@ before it. All three use `ANHD` operation 5, byte vertical delta.
 
 Two things bite:
 
-- **Extra Half-Brite.** Six bitplanes but only 32 `CMAP` entries: the top 32 colours are the
-  bottom 32 at half brightness. Without expanding them the upper half of the palette reads as
-  black. `CAMG` bit 0x80 announces it, and a short CMAP against six planes settles it anyway.
+- **Hold-and-Modify.** `CAMG` bit 0x800 is set on all of this artwork. A HAM6 pixel is six bits
+  whose top two select what to do: 00 takes a colour from the first 16 CMAP entries, and 01, 10
+  and 11 *hold* the previous pixel and *modify* its blue, red or green with the low four bits.
+  Decoding one of these as a plain 64-colour image gives dense red and green speckle, because
+  every modify pixel is read as an index. The game's own wall and sprite artwork has `CAMG` 0,
+  which is why that decoded correctly from the start.
 - The `.k` files beside them are *not* IFF. They start with a literal `ANIM`, a palette of 12-bit
   RGB words and a `BODY`; they are the engine's own repacked form, produced by
   `Code/IntroPlayer/AnimConvert01.ss`. Not decoded yet, and not needed while the IFF originals
   are present.
 
-**Unconfirmed:** all three decode with content confined to roughly the top-left 200x105 of the
-320x200 frame, the rest solid black. That is consistent with the data — the `BODY` is consumed
-exactly, the deltas animate correctly, and the same reader decodes the title screen full-frame —
-so it is most likely a window the intro player composites, with `Napisy.a`/`Napisy.g` (subtitles)
-filling the rest. Worth confirming against `IntroReplayer_125.ss` before building anything on it.
+**Still unconfirmed:** all three decode with content confined to roughly the top-left 200x105 of
+the 320x200 frame, the rest solid black. Fixing the HAM decode cleaned up the colours but did not
+change the framing, so it really is in the data: the `BODY` is consumed exactly, the deltas
+animate correctly, and the same reader now decodes the title screens full-frame and pixel-correct.
+Most likely a window the intro player composites, with `Napisy.a`/`Napisy.g` (subtitles) filling
+the rest. Worth confirming against `IntroReplayer_125.ss` before building on it.
 
 ## Not converted yet
 

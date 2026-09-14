@@ -125,7 +125,7 @@ Done:
 - enemy simulation: roaming, closing in, line of sight, shooting, damage and death
 - player weapons: hitscan fire, ammunition, weapon wear, per-species vulnerability mask
 - sound: 25 effects, positioned in the world for doors and enemies
-- intro animations decoded to PNG frames (IFF ANIM, op 5, Extra Half-Brite)
+- intro animations and artwork decoded to PNG (IFF ANIM op 5, Hold-and-Modify)
 - the ETAPY level sequence, with the inventory carried across levels
 - the original in-game messages, with their random variants
 - the level clock, low-energy warning, death, and the automap
@@ -159,6 +159,17 @@ the energy the save was made with.
 `SaveGame` writes that layout byte for byte, so a save made by the port is a file the Amiga game
 would read. The test suite loads the shipped `Savegame.DAT` and asserts its five slots read as
 free and its head block starts at -150 energy.
+
+## Hold-and-Modify
+
+The intro artwork and animations are HAM6, which `CAMG` bit 0x800 announces. A HAM pixel's top two
+bits say whether to take a colour from the palette or to hold the previous pixel and modify one of
+its components. Decoded as a plain indexed image they come out buried in red and green speckle --
+which is what the first version of this port did, and what a careful look at the title screen
+caught.
+
+The game's own wall and sprite artwork has `CAMG` 0 and is genuinely indexed, which is why that
+half was pixel-correct from the start.
 
 ## Campaign and text
 

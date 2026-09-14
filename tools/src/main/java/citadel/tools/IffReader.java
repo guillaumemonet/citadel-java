@@ -25,7 +25,10 @@ public final class IffReader {
     public final int[] palette;
     public final byte[] indices;
 
-    private IffReader(int w, int h, int planes, int[] pal, byte[] idx) {
+    public final boolean ham;
+
+    private IffReader(int w, int h, int planes, int[] pal, byte[] idx, boolean ham) {
+        this.ham = ham;
         this.width = w;
         this.height = h;
         this.planes = planes;
@@ -77,8 +80,10 @@ public final class IffReader {
             throw new IOException(f + ": incomplete ILBM");
         }
 
-        // Six planes against a 32-entry CMAP means Extra Half-Brite; fill in the derived half.
-        AnimReader.expandHalfBrite(pal, cmapEntries, planes, camg);
+        boolean ham = Hold.isHam(camg, planes);
+        if (!ham) {
+            AnimReader.expandHalfBrite(pal, cmapEntries, planes, camg);
+        }
 
         int rowBytes = ((w + 15) / 16) * 2;
         int totalPlanes = planes + (masking == 1 ? 1 : 0);
@@ -103,7 +108,7 @@ public final class IffReader {
                 }
             }
         }
-        return new IffReader(w, h, planes, pal, idx);
+        return new IffReader(w, h, planes, pal, idx, ham);
     }
 
     /** ByteRun1 decoder, one scanline at a time. */
@@ -131,8 +136,12 @@ public final class IffReader {
         BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         int[] line = new int[width];
         for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                line[x] = palette[indices[y * width + x] & 0xff];
+            if (ham) {
+                Hold.decodeRow(indices, y * width, width, palette, planes, line);
+            } else {
+                for (int x = 0; x < width; x++) {
+                    line[x] = palette[indices[y * width + x] & 0xff];
+                }
             }
             img.setRGB(0, y, width, 1, line, 0, width);
         }

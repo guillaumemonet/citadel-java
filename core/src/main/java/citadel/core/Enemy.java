@@ -43,6 +43,8 @@ public final class Enemy {
     public int counter;
     /** Walk animation phase, 0..3, advanced as the enemy moves. */
     public int phase;
+    /** Frames left before this one can shoot again; see GameState.ENEMY_RELOAD. */
+    public int reload;
 
     public Enemy(Level.EnemySpawn spawn) {
         this.slot = spawn.slot;

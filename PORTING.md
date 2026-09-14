@@ -107,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 34 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 39 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -127,12 +127,12 @@ Done:
 - intro animations decoded to PNG frames (IFF ANIM, op 5, Extra Half-Brite)
 - the ETAPY level sequence, with the inventory carried across levels
 - the original in-game messages, with their random variants
+- the level clock, low-energy warning, death, and the automap
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the on-screen counters and their timers (`Test_Counters`)
-- HUD proper, automap, compass, the menu, briefing and save screens (`SERVER`)
+- compass and the original HUD layout; the menu, briefing and save screens (`SERVER`)
 - playing the intro in-game, and the death sequence
 
 ## Campaign and text
@@ -153,6 +153,19 @@ which is why walking into a wall insults you differently every time.
 Message numbers are verified against their call sites at 40, 41, 44, 52, 53, 54, 65 and 76. Pickup
 messages need no table of their own: every branch of `Take_Items` computes an index that works out
 to the item value itself.
+
+## Counters and the automap
+
+`NewLev3` ticks the level clock once every 50 frames, `Test_Counters` turns the energy readout red
+and beeps below 10, and zero energy ends the level as a death. There is **no energy regeneration**
+anywhere in the engine: energy only ever goes down, except for medikits.
+
+Walking into a wall costs a point (`br_BumpWall`), but only on a real stride — the routine wants
+the movement vector at 120 or more, so edging along a wall is free. Some weapons cost energy to
+fire, too.
+
+`UpdateMap` keeps one bit per cell and reveals the cell underfoot plus every neighbour with no wall
+between, which is why a corridor fills in ahead of you. `Automap` paints that into a texture.
 
 ## Enemies
 
@@ -199,7 +212,8 @@ Known gaps:
 - in-flight object sprites (projectiles, flames, explosions) have provisional sizes
 - no travelling projectiles, so no rocket splash damage (`ro_SetExplode`) and no flame trail
 - knockback is decoded (enemy bytes 14/15) but not applied
-- enemy shots apply damage directly rather than spawning an object
+- enemy shots apply damage directly rather than spawning an object, so they are given a 25 frame
+  reload to stand in for a projectile's flight time
 - wall plaques and blood decals are decoded but not yet drawn
 - card readers are parsed and can be fired, but nothing checks whether you hold the card
 - switch commands tagged "on release" are parsed and skipped; they need a held-button model

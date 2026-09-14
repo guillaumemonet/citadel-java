@@ -46,6 +46,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private LevelGeometry geometry;
     private SoundSystem sound;
     private BitmapText hud;
+    private Automap automap;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
     private float mouseTurn;
@@ -114,6 +115,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         flyCam.setEnabled(false);
         setupInput();
         setupHud();
+        automap = new Automap(assetManager, cam.getWidth(), cam.getHeight());
+        guiNode.attachChild(automap.picture());
         syncCamera();
 
         String shotDir = System.getProperty("citadel.screenshot");
@@ -143,8 +146,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 new MouseButtonTrigger(MouseInput.BUTTON_RIGHT));
         inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL),
                 new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
+        inputManager.addMapping("map", new KeyTrigger(KeyInput.KEY_M));
         inputManager.addListener(this,
-                "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire");
+                "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire", "map");
 
         // 1..6 select a weapon, 0 goes back to the bare hand, as F1..F0 do in the original.
         int[] keys = {KeyInput.KEY_0, KeyInput.KEY_1, KeyInput.KEY_2, KeyInput.KEY_3,
@@ -177,6 +181,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             turnRight = pressed;
         } else if ("use".equals(name) && pressed) {
             game.use();
+        } else if ("map".equals(name) && pressed) {
+            automap.toggle();
         } else if ("fire".equals(name)) {
             firing = pressed;
             if (pressed) {
@@ -304,6 +310,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         geometry.syncDoors(game);
         geometry.syncEnemies(game);
+        automap.update(game);
         sound.serve(game);
         syncCamera();
         updateHud();
@@ -359,14 +366,17 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
         }
         hud.setText(String.format(
-                "energy %d   %s %d   %s%s   cell (%d,%d) facing %s%n%s%s",
+                "energy %d%s   %s %d   %s%s   %d:%02d   cell (%d,%d) facing %s%n%s%s",
                 inv.energyReading(),
+                game.isEnergyCritical() ? " !" : "",
                 citadel.core.Inventory.WEAPON_NAMES[inv.current], inv.ammoReading(),
                 cards.length() > 0 ? "cards " + cards : "",
                 inv.speedBoost > 0 ? "  [fast]" : "",
+                game.levelSeconds() / 60, game.levelSeconds() % 60,
                 game.cellX(), game.cellY(),
                 citadel.core.MapFile.DIR_NAMES[game.facingDir()],
-                game.isLevelComplete() ? "[EXIT REACHED]  " : "",
+                game.isPlayerDead() ? "[YOU ARE DEAD]  "
+                        : game.isLevelComplete() ? "[EXIT REACHED]  " : "",
                 message));
     }
 

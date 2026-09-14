@@ -94,6 +94,7 @@ public final class SoundTable {
     public static final int PLAYER_HURT = 12;    // SOUND 13, oc_PlayerHit
     public static final int BUMP = 0;            // SOUND 1,  walking into a wall
     public static final int CARD = 20;           // SOUND 21, using a card
+    public static final int BEEP = 21;           // SOUND 22, do_pikaj low-energy warning
     /** Enemy roars, picked at random from this run of four (SOUND4 with d2 in 18..21). */
     public static final int ENEMY_ROAR_FIRST = 17;
     public static final int ENEMY_ROAR_COUNT = 4;

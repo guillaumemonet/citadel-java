@@ -26,7 +26,7 @@ Conversion has to run once before the game: the viewer loads its textures from `
 while level data is read straight out of the original `.MAP` files.
 
 **Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall you are
-facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand.
+facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand. `M` toggles the automap.
 
 ## What works
 
@@ -48,11 +48,12 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
 - The 21-level campaign runs end to end: reaching the exit loads the next map and carries your
   inventory across, following the server's ETAPY table.
 - Messages are the original ones, random variants and all, read from `TEXT.ENG`.
+- Automap (press `M`), level clock, low-energy warning, and dying when energy runs out.
 
 ## What is missing
 
 - Travelling projectiles (`Anim_Objects`): rocket splash damage and flame trails.
-- HUD proper, automap and compass; the menu, briefing and save screens (`SERVER`).
+- Compass and the original HUD layout; the menu, briefing and save screens (`SERVER`).
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.
 

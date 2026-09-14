@@ -64,6 +64,41 @@ public final class GameState {
     /** Accumulates fractional engine frames so the simulation ticks at the original rate. */
     private float frameAccumulator;
 
+    /**
+     * Cells the player has seen, which is the automap. UpdateMap marks the cell underfoot plus
+     * every neighbour with no wall between, so the map fills in as you look down corridors.
+     */
+    private final boolean[] visited = new boolean[Level.GRID * Level.GRID];
+    /** Seconds spent on this level; NewLev3 ticks sv_Time once every 50 frames. */
+    private int levelSeconds;
+    /**
+     * Must stay floating point: a frame is dt * 50, which for dt = 1/50 comes out at 0.99999998,
+     * and {@code int += float} truncates, so an int counter here never advances.
+     */
+    private float secondFrames;
+    private boolean playerDead;
+    /** Frames until the low-energy warning beeps again, from do_pikaj's 55 frame reload. */
+    private float beepCountdown;
+    /** True when the last move ran into something hard enough to count, per br_BumpWall. */
+    private boolean bumped;
+
+    public boolean isVisited(int x, int y) {
+        return Level.inside(x, y) && visited[x + y * Level.GRID];
+    }
+
+    public int levelSeconds() {
+        return levelSeconds;
+    }
+
+    public boolean isPlayerDead() {
+        return playerDead;
+    }
+
+    /** The engine flashes the counter red and beeps below 10 energy. */
+    public boolean isEnergyCritical() {
+        return inventory.energyReading() < 10;
+    }
+
     public GameState(Level level) {
         this.level = level;
         this.posX = level.spawnCellX * Level.CELL_UNITS + Level.CELL_UNITS / 2;
@@ -223,6 +258,9 @@ public final class GameState {
      * @param dt      seconds since the last call
      */
     public void update(float forward, float strafe, float turn, float dt) {
+        if (playerDead) {
+            return;
+        }
         float frames = dt * FRAMES_PER_SECOND;
         if (turn != 0f) {
             angle = (angle - Math.round(turn * ROT_SPEED * frames)) & 511;
@@ -238,12 +276,20 @@ public final class GameState {
             }
             double dx = (forward * forwardX() + strafe * rightX()) * inventory.walkSpeed() * frames;
             double dy = (forward * forwardY() + strafe * rightY()) * inventory.walkSpeed() * frames;
+            bumped = false;
             step(dx, dy);
+            // br_BumpWall only counts a collision when the move was a real stride: it needs the
+            // vector length at 120 or more, so brushing a wall while edging along costs nothing.
+            if (bumped && Math.hypot(dx, dy) >= 120) {
+                hitWall();
+            }
         }
 
         serveDoors();
         takeItems();
+        markVisited();
         checkExit();
+        serveCounters(frames);
 
         // Enemies, counters and timers run on the original's frame clock, not on the renderer's.
         frameAccumulator += frames;
@@ -252,6 +298,58 @@ public final class GameState {
         for (int i = 0; i < ticks; i++) {
             inventory.tick();
             moveEnemies();
+        }
+    }
+
+    /**
+     * Test_Counters and the second-tick in NewLev3: run the level clock, watch for the player
+     * running out of energy, and beep while it is low.
+     */
+    private void serveCounters(float frames) {
+        secondFrames += frames;
+        while (secondFrames >= FRAMES_PER_SECOND) {
+            secondFrames -= FRAMES_PER_SECOND;
+            levelSeconds++;
+        }
+
+        if (!inventory.isAlive()) {
+            playerDead = true;
+            log.add(text(39, "you are dead"));
+            playSound(SoundTable.PLAYER_HURT);
+            return;
+        }
+        if (isEnergyCritical()) {
+            beepCountdown -= frames;
+            if (beepCountdown <= 0) {
+                beepCountdown = 55;
+                playSound(SoundTable.BEEP);
+            }
+        } else {
+            beepCountdown = 0;
+        }
+    }
+
+    /** br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult. */
+    private void hitWall() {
+        inventory.hurt(1);
+        log.add(text(TextTable.BUMP_WALL, "ouch"));
+    }
+
+    /**
+     * UpdateMap: mark the cell underfoot, then every neighbour the player can see into, meaning
+     * those with no wall between. That is why the automap fills in ahead of you down a corridor.
+     */
+    private void markVisited() {
+        int cx = cellX(), cy = cellY();
+        visited[cx + cy * Level.GRID] = true;
+        for (int d = 0; d < 4; d++) {
+            if (level.hasWall(cx, cy, d)) {
+                continue;
+            }
+            int nx = cx + Level.DX[d], ny = cy + Level.DY[d];
+            if (Level.inside(nx, ny)) {
+                visited[nx + ny * Level.GRID] = true;
+            }
         }
     }
 
@@ -352,13 +450,17 @@ public final class GameState {
 
         if (inX < r && !level.isPassable(cx, cy, Level.WEST_DIR)) {
             inX = r;
+            bumped = true;
         } else if (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR)) {
             inX = far;
+            bumped = true;
         }
         if (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR)) {
             inY = r;
+            bumped = true;
         } else if (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR)) {
             inY = far;
+            bumped = true;
         }
 
         int col = level.column(cx, cy);
@@ -620,6 +722,9 @@ public final class GameState {
                     }
                     break;
                 default:
+                    if (e.reload > 0) {
+                        e.reload--;
+                    }
                     think(e);
                     break;
             }
@@ -637,6 +742,10 @@ public final class GameState {
         Level.EnemyTemplate stats = level.enemyTemplates[e.species];
         int roll = rnd.nextInt(8192);
 
+        if (e.reload > 0) {
+            wander(e);
+            return;
+        }
         boolean standOff = dist + stats.energy >= roll;
         int toPlayer = angleTowards(-dx, -dy);
 
@@ -730,17 +839,38 @@ public final class GameState {
         return true;
     }
 
+    /** Frames an enemy waits between shots, standing in for a projectile's flight time. */
+    public static final int ENEMY_RELOAD = 25;
+
+    /**
+     * An enemy shot landing on the player. oc_PlayerHit uses the same damage table as
+     * EnemyHitServe does for enemies, keyed on the projectile type the enemy's weapon fires:
+     * 5 for a bullet, 25 for a fireball, 20 for electricity, 40 for a rocket.
+     *
+     * The original spawns a travelling object and only hurts the player when it arrives. Here the
+     * shot resolves at once, so the enemy is given a reload delay to stand in for the flight time.
+     * Without it a room full of enemies empties a full energy bar in about two seconds.
+     */
     private void fire(Enemy e) {
+        e.reload = ENEMY_RELOAD;
         if (!canShoot(e.x, e.y, posX, posY)) {
             return;
         }
         Level.EnemyTemplate stats = level.enemyTemplates[e.species];
-        int damage = 4 + stats.weapon * 2;
+        int damage = SHOT_DAMAGE[enemyShotType(stats.weapon)];
         inventory.hurt(damage);
         playSound(SoundTable.PLAYER_HURT);
-        log.add(inventory.isAlive()
-                ? "hit for " + damage
-                : "you are dead");
+        log.add(text(72, "hit for " + damage));
+    }
+
+    /** Maps an enemy's weapon number onto the projectile type it fires, as es_EnemyShoot does. */
+    private static int enemyShotType(int weapon) {
+        switch (weapon) {
+            case 4: return SHOT_FIREBALL;
+            case 5: return SHOT_ELECTRIC;
+            case 6: return SHOT_ROCKET;
+            default: return SHOT_BULLET;
+        }
     }
 
     /** Applies damage to an enemy, from the player's weapons. */

@@ -30,8 +30,8 @@ import com.jme3.system.AppSettings;
  *   gradle :game:run --args=LEVEL05B
  * </pre>
  *
- * Controls follow the original as closely as a keyboard allows: the mouse turns, W/S walk,
- * A/D strafe, E or the right mouse button uses whatever wall you are facing.
+ * Controls: the mouse turns, W/S walk, A/D strafe, left mouse or Ctrl fires, E or right mouse
+ * uses the wall you are facing, 1..6 pick a weapon and 0 goes back to the bare hand.
  */
 public final class CitadelApp extends SimpleApplication implements ActionListener, AnalogListener {
 
@@ -132,8 +132,18 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         inputManager.addMapping("use", new KeyTrigger(KeyInput.KEY_E),
                 new KeyTrigger(KeyInput.KEY_SPACE),
                 new MouseButtonTrigger(MouseInput.BUTTON_RIGHT));
+        inputManager.addMapping("fire", new KeyTrigger(KeyInput.KEY_LCONTROL),
+                new MouseButtonTrigger(MouseInput.BUTTON_LEFT));
         inputManager.addListener(this,
-                "fwd", "back", "left", "right", "turnL", "turnR", "use");
+                "fwd", "back", "left", "right", "turnL", "turnR", "use", "fire");
+
+        // 1..6 select a weapon, 0 goes back to the bare hand, as F1..F0 do in the original.
+        int[] keys = {KeyInput.KEY_0, KeyInput.KEY_1, KeyInput.KEY_2, KeyInput.KEY_3,
+                KeyInput.KEY_4, KeyInput.KEY_5, KeyInput.KEY_6};
+        for (int i = 0; i < keys.length; i++) {
+            inputManager.addMapping("weapon" + i, new KeyTrigger(keys[i]));
+            inputManager.addListener(this, "weapon" + i);
+        }
 
         inputManager.addMapping("mouseL", new MouseAxisTrigger(MouseInput.AXIS_X, true));
         inputManager.addMapping("mouseR", new MouseAxisTrigger(MouseInput.AXIS_X, false));
@@ -158,6 +168,29 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             turnRight = pressed;
         } else if ("use".equals(name) && pressed) {
             game.use();
+        } else if ("fire".equals(name)) {
+            firing = pressed;
+            if (pressed) {
+                game.fire();
+            }
+        } else if (name.startsWith("weapon") && pressed) {
+            int slot = name.charAt(name.length() - 1) - '0';
+            if (!game.inventory.select(slot)) {
+                game.note("you have no " + citadel.core.Inventory.WEAPON_NAMES[slot]);
+            }
+        }
+    }
+
+    /**
+     * The machinegun keeps firing while the button is held; every other weapon needs the trigger
+     * released, which is what the cc_RequestTab dance in Check_RMB amounts to.
+     */
+    private boolean firing;
+    private static final int MACHINEGUN = 3;
+
+    private void serveAutoFire() {
+        if (firing && game.inventory.current == MACHINEGUN) {
+            game.fire();
         }
     }
 
@@ -194,6 +227,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
         }
 
+        serveAutoFire();
         game.update(fwd, strafe, turn, Math.min(tpf, 0.1f));
 
         if (game.consumeGeometryDirty()) {

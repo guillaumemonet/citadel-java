@@ -23,7 +23,6 @@ Requires a JDK 21 toolchain. `build/` and `tools/out/` are gitignored.
 ```sh
 gradle :tools:convert          # Data -> build/assets (PNG, WAV, text dumps)
 gradle :game:run               # walk around LEVEL01A
-                               # mouse turns, W/S walk, A/D strafe, E uses a switch
 gradle :game:run --args=LEVEL05B
 ```
 
@@ -68,6 +67,17 @@ from the spawn, the exit, both ends of every teleport and every enemy position, 
 passable. This was cross-checked by rendering the level from above and comparing it against the
 2D map dump.
 
+## Angles
+
+The angle runs 0..511 for a full turn, but **the forward vector is `(-cos a, sin a)`**, not the
+naive `(cos a, sin a)`. Both the player (`sv_DoMMove`) and the enemies (`me_w4`) hand `sv_rotate`
+the value `256 - angle` rather than the angle itself, which flips the X axis. So angle 0 faces
+**west**, 128 north, 256 east, 384 south — and `rm_HandUsed` says as much in its own comment,
+"W for 0 degrees".
+
+Getting this backwards mirrors east and west: the player walks fine, but every "use" lands on the
+wall behind the one they are facing. `facingAndForwardAgreeWithTheEngine` pins it down.
+
 ## Movement rules
 
 `GameState` reimplements the original's rules rather than substituting a physics engine, so the
@@ -97,7 +107,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 12 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 21 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
@@ -112,11 +122,11 @@ Done:
 - movement, collision, automatic doors, switches and their commands, teleports, level exit
 - item pickup and a working inventory (weapons, ammo, cards, first aid, boost, vodka, warhead)
 - enemy simulation: roaming, closing in, line of sight, shooting, damage and death
+- player weapons: hitscan fire, ammunition, weapon wear, per-species vulnerability mask
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- player weapons (`Check_RMB`) and projectiles (`Anim_Objects`)
 - the on-screen counters and their timers (`Test_Counters`)
 - HUD proper, automap, compass, the menu and inventory layer (`SERVER`)
 - sound playback, intro and death sequences
@@ -139,10 +149,34 @@ Two places take a functional equivalent rather than a transcription, both noted 
 - **Randomness** uses a seeded PRNG. The original reads bytes out of Amiga ROM as its entropy
   source, which cannot be reproduced and does not need to be.
 
+## Weapons
+
+Shots are **hitscan, resolved in the frame the trigger is pulled**, because that is what the
+original does: `rm_HandGunUsed` runs its whole collision loop immediately. Only slow objects
+(flames, rockets in flight) persist in `sv_ObjectTab` across frames, and those are not modelled
+yet.
+
+`EnemyHitServe` fixes the damage table and, more importantly, reveals that the header field the
+editor labels "hits" is really a **4-bit vulnerability mask**: bit 0 bullets, bit 1 fireballs,
+bit 2 electricity, bit 3 rockets. A species with the bit clear takes no damage at all from that
+type.
+
+| type | engine name | damage | weapons |
+|---|---|---|---|
+| 1 | pocisk (bullet) | 5 | handgun, shotgun, machinegun |
+| 3 | kula (fireball) | 25 | flamer |
+| 4 | prad (electricity) | 20 | bolter |
+| 5 | rakieta (rocket) | 40 | launcher |
+
+A fireball that finishes an enemy leaves it burning rather than simply dead. Weapons wear out:
+`DamageWeapon` knocks 0 or 1 off the condition per shot, and a weapon at 0 refuses to fire.
+
 Known gaps:
 
 - in-flight object sprites (projectiles, flames, explosions) have provisional sizes
-- enemy shots apply damage directly; there are no travelling projectiles yet
+- no travelling projectiles, so no rocket splash damage (`ro_SetExplode`) and no flame trail
+- knockback is decoded (enemy bytes 14/15) but not applied
+- enemy shots apply damage directly rather than spawning an object
 - wall plaques and blood decals are decoded but not yet drawn
 - card readers are parsed and can be fired, but nothing checks whether you hold the card
 - switch commands tagged "on release" are parsed and skipped; they need a held-button model

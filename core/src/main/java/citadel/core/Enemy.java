@@ -79,8 +79,7 @@ public final class Enemy {
      * of a turn.
      */
     public int viewDirection(int playerX, int playerY) {
-        int toPlayer = (int) Math.round(
-                Math.atan2(playerY - y, (double) (playerX - x)) * 256.0 / Math.PI) & 511;
+        int toPlayer = GameState.angleTowards(playerX - x, playerY - y);
         int rel = (angle - toPlayer + 512 + 43) & 511;
         return Math.min(5, rel * 6 / 512);
     }

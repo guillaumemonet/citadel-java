@@ -240,25 +240,38 @@ public final class Level {
     // ------------------------------------------------------------- content
 
     public static final class EnemyTemplate {
-        public final int hitsA;
-        public final int hitsB;
+        /**
+         * Which damage types hurt this species, one bit each, from the btst chain in
+         * EnemyHitServe: bit 0 bullets, bit 1 fireballs, bit 2 electricity, bit 3 rockets.
+         * The editor shows it as two 2-bit "hits" fields, but the engine reads it as a mask.
+         */
+        public final int vulnerability;
         public final int weapon;
         public final int energy;
         public final int aggression;
 
         EnemyTemplate(MapFile m, int which) {
             int base = (which == 0) ? 4 : 10;
-            int hits = m.header8(base);
-            hitsA = (hits >> 2) & 3;
-            hitsB = hits & 3;
+            vulnerability = m.header8(base) & 0xf;
             weapon = m.header8(base + 1);
             energy = m.header16(base + 2);
             aggression = m.header16(base + 4);
         }
 
+        /** @param type the projectile type, 1 bullet, 3 fireball, 4 electricity, 5 rocket */
+        public boolean vulnerableTo(int type) {
+            switch (type) {
+                case 1: return (vulnerability & 1) != 0;
+                case 3: return (vulnerability & 2) != 0;
+                case 4: return (vulnerability & 4) != 0;
+                case 5: return (vulnerability & 8) != 0;
+                default: return true;
+            }
+        }
+
         @Override
         public String toString() {
-            return "hits=" + hitsA + "/" + hitsB + " weapon=" + weapon
+            return "vulnerability=" + Integer.toBinaryString(vulnerability) + " weapon=" + weapon
                     + " energy=" + energy + " aggression=" + aggression;
         }
     }

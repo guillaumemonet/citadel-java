@@ -136,6 +136,18 @@ public final class Inventory {
         }
     }
 
+    /**
+     * Selects a weapon slot if it is owned. Slot 0, the bare hand, is always available and is what
+     * the engine uses for opening doors and pressing switches.
+     */
+    public boolean select(int slot) {
+        if (slot < 0 || slot >= WEAPON_COUNT || !owned[slot]) {
+            return false;
+        }
+        current = slot;
+        return true;
+    }
+
     /** Damage taken; energy moves towards zero and the player dies when it reaches it. */
     public void hurt(int amount) {
         energy = Math.min(0, energy + amount);

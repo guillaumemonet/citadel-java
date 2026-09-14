@@ -25,8 +25,8 @@ gradle :game:run --args=LEVEL05B
 Conversion has to run once before the game: the viewer loads its textures from `build/assets`,
 while level data is read straight out of the original `.MAP` files.
 
-**Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall
-you are facing.
+**Controls** — mouse turns, `W`/`S` walk, `A`/`D` strafe, `E` or right mouse button uses the wall you are
+facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to the bare hand.
 
 ## What works
 
@@ -41,10 +41,12 @@ you are facing.
   keycards, first aid, speed boost, vodka, warhead sections.
 - Enemies are simulated in the 24 × 24 cells around the player: they roam, close in, take line of
   sight into account, and shoot.
+- Weapons fire: hitscan resolution like the original, ammunition, weapon wear, and the 4-bit
+  vulnerability mask that makes some species immune to some damage types.
 
 ## What is missing
 
-- Player weapons and projectiles (`Check_RMB`, `Anim_Objects`).
+- Travelling projectiles (`Anim_Objects`): rocket splash damage and flame trails.
 - HUD proper, automap, compass, and the menu and inventory layer (`SERVER`).
 - Sound playback — the effects are converted to WAV but nothing plays them yet.
 - Intro and death sequences.

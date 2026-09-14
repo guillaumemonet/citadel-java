@@ -250,11 +250,46 @@ class GameStateTest {
 
     private static int angleFacing(int dir) {
         switch (dir) {
-            case Level.EAST_DIR:  return 0;
+            case Level.WEST_DIR:  return 0;
             case Level.NORTH_DIR: return 128;
-            case Level.WEST_DIR:  return 256;
+            case Level.EAST_DIR:  return 256;
             default:              return 384;
         }
+    }
+
+    /**
+     * Pins down the angle convention, which is easy to get backwards and expensive when you do:
+     * mirroring east and west sends every "use" at the wall behind the player.
+     *
+     * The cardinal values come from rm_HandUsed, whose own comment reads "W for 0 degrees"; the
+     * loop then checks the movement vector agrees with the face the player is deemed to face.
+     */
+    @Test
+    void facingAndForwardAgreeWithTheEngine() {
+        GameState game = new GameState(dummyLevel());
+        for (int dir : new int[]{
+                Level.WEST_DIR, Level.NORTH_DIR, Level.EAST_DIR, Level.SOUTH_DIR}) {
+            game.angle = angleFacing(dir);
+            assertEquals(dir, game.facingDir(),
+                    "angle " + game.angle + " should face " + MapFile.DIR_NAMES[dir]);
+        }
+
+        for (int a = 0; a < 512; a += 2) {
+            game.angle = a;
+            int dir = game.facingDir();
+            double dot = GameState.forwardX(a) * Level.DX[dir]
+                    + GameState.forwardY(a) * Level.DY[dir];
+            assertTrue(dot >= 0.7,
+                    "at angle " + a + " the player faces " + MapFile.DIR_NAMES[dir]
+                            + " but moves the other way (dot " + dot + ")");
+        }
+    }
+
+    private static Level dummyLevel() {
+        byte[] raw = new byte[MapFile.EVENTS_OFF + 4];
+        raw[MapFile.EVENTS_OFF] = (byte) 0xff;
+        raw[MapFile.EVENTS_OFF + 1] = (byte) 0xff;
+        return new Level(new MapFile("dummy", raw));
     }
 
     /** Reaching the cell the header names as the exit ends the level. */

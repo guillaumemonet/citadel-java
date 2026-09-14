@@ -10,7 +10,7 @@ import java.util.List;
  *
  * Distances and angles keep the original engine's units. Positions are in world units with
  * {@link Level#CELL_UNITS} per cell; the angle runs 0..511 for a full turn and the forward vector
- * is {@code (cos a, sin a)} in (X, Y), which is what sv_rotate computes.
+ * is {@code (-cos a, sin a)} in (X, Y), which is what sv_rotate computes for {@code 256 - angle}.
  */
 public final class GameState {
 
@@ -45,7 +45,7 @@ public final class GameState {
 
     public int posX;
     public int posY;
-    /** 0..511, a full turn. 0 faces +X (east), 128 faces +Y (north). */
+    /** 0..511, a full turn. 0 faces -X (west), 128 faces +Y (north). */
     public int angle;
 
     private int lastInX = 512;
@@ -99,6 +99,11 @@ public final class GameState {
         return was;
     }
 
+    /** Adds a message to the same log the rules write to, for front-end feedback. */
+    public void note(String message) {
+        log.add(message);
+    }
+
     /** Messages the last update produced, for the HUD or for debugging. Cleared by the caller. */
     public List<String> drainLog() {
         List<String> out = new ArrayList<String>(log);
@@ -108,6 +113,45 @@ public final class GameState {
 
     public float angleRadians() {
         return (float) (angle * 2.0 * Math.PI / 512.0);
+    }
+
+    /**
+     * The forward vector for an angle, in world axes.
+     *
+     * Both the player (sv_DoMMove) and the enemies (me_w4) hand sv_rotate {@code 256 - angle}
+     * rather than the angle itself, and sv_rotate with no sideways component yields
+     * {@code (L*cos(index), L*sin(index))}. Substituting gives <b>(-cos a, sin a)</b>: the X axis
+     * runs the opposite way to the naive reading. Getting this wrong mirrors east and west, which
+     * would send every "use" at the wall behind the one the player is facing.
+     */
+    public static double forwardX(int angle) {
+        return -Math.cos(angle * 2.0 * Math.PI / 512.0);
+    }
+
+    public static double forwardY(int angle) {
+        return Math.sin(angle * 2.0 * Math.PI / 512.0);
+    }
+
+    private double forwardX() {
+        return forwardX(angle);
+    }
+
+    private double forwardY() {
+        return forwardY(angle);
+    }
+
+    /** Strafing right, i.e. the forward vector turned a quarter turn, from the d3 cases. */
+    private double rightX() {
+        return Math.sin(angle * 2.0 * Math.PI / 512.0);
+    }
+
+    private double rightY() {
+        return Math.cos(angle * 2.0 * Math.PI / 512.0);
+    }
+
+    /** The angle whose forward vector points along (dx, dy). Inverse of {@link #forwardX}. */
+    public static int angleTowards(int dx, int dy) {
+        return (int) Math.round(Math.atan2(dy, (double) -dx) * 256.0 / Math.PI) & 511;
     }
 
     // --------------------------------------------------------------- update
@@ -134,11 +178,8 @@ public final class GameState {
                 forward /= mag;
                 strafe /= mag;
             }
-            double a = angleRadians();
-            double cos = Math.cos(a), sin = Math.sin(a);
-            // sv_rotate: x' = strafe*sin + forward*cos, y' = forward*sin - strafe*cos
-            double dx = (strafe * sin + forward * cos) * WALK_SPEED * frames;
-            double dy = (forward * sin - strafe * cos) * WALK_SPEED * frames;
+            double dx = (forward * forwardX() + strafe * rightX()) * inventory.walkSpeed() * frames;
+            double dy = (forward * forwardY() + strafe * rightY()) * inventory.walkSpeed() * frames;
             step(dx, dy);
         }
 
@@ -579,9 +620,8 @@ public final class GameState {
      * @return true when the enemy actually moved
      */
     private boolean stepEnemy(Enemy e) {
-        double a = e.angle * 2.0 * Math.PI / 512.0;
-        int nx = e.x + (int) Math.round(Math.cos(a) * e.speed);
-        int ny = e.y + (int) Math.round(Math.sin(a) * e.speed);
+        int nx = e.x + (int) Math.round(forwardX(e.angle) * e.speed);
+        int ny = e.y + (int) Math.round(forwardY(e.angle) * e.speed);
         if (nx < 0 || ny < 0 || nx >= 64 * Level.CELL_UNITS || ny >= 64 * Level.CELL_UNITS) {
             return false;
         }
@@ -697,22 +737,177 @@ public final class GameState {
         return false;
     }
 
-    private static int angleTowards(int dx, int dy) {
-        return (int) Math.round(Math.atan2(dy, (double) dx) * 256.0 / Math.PI) & 511;
+    // -------------------------------------------------------------- weapons
+
+    /**
+     * Damage types and their damage, from the btst chain in EnemyHitServe. The engine calls them
+     * pocisk, kula, prad and rakieta: bullet, fireball, electricity, rocket.
+     */
+    public static final int SHOT_BULLET = 1;
+    public static final int SHOT_FIREBALL = 3;
+    public static final int SHOT_ELECTRIC = 4;
+    public static final int SHOT_ROCKET = 5;
+
+    private static final int[] SHOT_DAMAGE = {0, 5, 0, 25, 20, 40};
+
+    /** Damage type each weapon slot delivers; slot 0 is the bare hand. */
+    private static final int[] WEAPON_SHOT = {
+            0, SHOT_BULLET, SHOT_BULLET, SHOT_BULLET, SHOT_FIREBALL, SHOT_ELECTRIC, SHOT_ROCKET,
+    };
+    /** Pellets per trigger pull; only the shotgun fires more than one. */
+    private static final int[] WEAPON_PELLETS = {0, 1, 5, 1, 1, 1, 1};
+
+    /** Step length and step count of a shot, from the hitscan loop in rm_HandGunUsed. */
+    private static final int SHOT_STEP = 400;
+    private static final int SHOT_STEPS = 20;
+
+    /**
+     * The fire action, i.e. Check_RMB with a weapon in hand. With the bare hand it falls through
+     * to {@link #use()}, which is what the engine does with sv_SpaceOn.
+     *
+     * Shots are resolved immediately rather than as travelling objects: rm_HandGunUsed runs its
+     * whole collision loop in the frame the trigger is pulled. Only slow objects (flames, rockets
+     * in flight) live in sv_ObjectTab across frames, and those are not modelled yet.
+     *
+     * @return true when a shot was actually fired
+     */
+    public boolean fire() {
+        int w = inventory.current;
+        if (w == Inventory.HAND) {
+            return use();
+        }
+        if (!inventory.owned[w]) {
+            log.add("you have no " + Inventory.WEAPON_NAMES[w]);
+            return false;
+        }
+        if (inventory.ammo[w] >= 0) {
+            log.add("no ammunition");
+            return false;
+        }
+        if (inventory.condition[w] <= 0) {
+            log.add("the " + Inventory.WEAPON_NAMES[w] + " is broken");
+            return false;
+        }
+        // DamageWeapon wears the weapon down by 0 or 1 per shot.
+        inventory.condition[w] = Math.max(0, inventory.condition[w] - rnd.nextInt(2));
+        inventory.ammo[w]++;
+
+        int type = WEAPON_SHOT[w];
+        int pellets = WEAPON_PELLETS[w];
+        int hits = 0;
+        for (int i = 0; i < pellets; i++) {
+            // The shotgun sprays; everything else fires straight down the middle.
+            int spread = (pellets == 1) ? 0 : rnd.nextInt(17) - 8;
+            if (shoot((angle + spread) & 511, type)) {
+                hits++;
+            }
+        }
+        if (hits > 0) {
+            log.add(hits == 1 ? "hit" : hits + " hits");
+        }
+        return true;
+    }
+
+    /**
+     * Walks a shot out from the player until it meets a wall or an enemy.
+     *
+     * @return true when it hit a living enemy
+     */
+    private boolean shoot(int shotAngle, int type) {
+        double dx = forwardX(shotAngle) * SHOT_STEP;
+        double dy = forwardY(shotAngle) * SHOT_STEP;
+        double x = posX, y = posY;
+        int cx = cellX(), cy = cellY();
+
+        for (int step = 0; step < SHOT_STEPS; step++) {
+            x += dx;
+            y += dy;
+            if (x < 0 || y < 0 || x >= 64 * Level.CELL_UNITS || y >= 64 * Level.CELL_UNITS) {
+                return false;
+            }
+            int ncx = (int) (x / Level.CELL_UNITS);
+            int ncy = (int) (y / Level.CELL_UNITS);
+            if (ncx != cx) {
+                if (!level.isPassable(cx, cy, ncx > cx ? Level.EAST_DIR : Level.WEST_DIR)) {
+                    return false;
+                }
+                cx = ncx;
+            }
+            if (ncy != cy) {
+                if (!level.isPassable(cx, cy, ncy > cy ? Level.NORTH_DIR : Level.SOUTH_DIR)) {
+                    return false;
+                }
+                cy = ncy;
+            }
+            Enemy hit = enemyNear((int) x, (int) y);
+            if (hit != null) {
+                hitEnemy(hit, type);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Enemy enemyNear(int x, int y) {
+        for (Enemy e : enemies) {
+            if (e.isDead()) {
+                continue;
+            }
+            if (Math.abs(e.x - x) < Enemy.RADIUS && Math.abs(e.y - y) < Enemy.RADIUS) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * EnemyHitServe: a species only takes damage from the types its vulnerability mask allows,
+     * and a fireball that finishes it off leaves it burning rather than simply dead.
+     */
+    private void hitEnemy(Enemy e, int type) {
+        if (e.state == Enemy.KILLED || e.state == Enemy.BURNING) {
+            return;
+        }
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
+        if (!stats.vulnerableTo(type)) {
+            log.add("no effect");
+            return;
+        }
+        // the enemy turns to face whoever shot it
+        e.angle = (angle + 256) & 511;
+        e.energy -= SHOT_DAMAGE[type];
+        if (e.energy > 0) {
+            e.state = Enemy.HIT;
+            e.counter = 8;
+        } else if (type == SHOT_FIREBALL) {
+            e.state = Enemy.BURNING;
+            e.energy = 20;
+        } else {
+            kill(e);
+        }
     }
 
     // ------------------------------------------------------------- triggers
 
-    /** The wall face the player is looking at: the cell's face in the nearest cardinal direction. */
+    /**
+     * The wall face the player is looking at, transcribed from rm_HandUsed:
+     *
+     * <pre>
+     *   d0 = (angle + 64) &amp; $1fe ; d1 = 2
+     *   repeat { d1++ ; d0 -= 128 } while d0 &gt;= 0
+     *   dir = d1 &amp; 3
+     * </pre>
+     *
+     * The engine's own comment pins it down: "W for 0 degrees".
+     */
     public int facingDir() {
-        // angle 0 faces +X (east, dir 1) and 128 faces +Y (north, dir 0)
-        int quadrant = ((angle + 64) >> 7) & 3;
-        switch (quadrant) {
-            case 0:  return Level.EAST_DIR;
-            case 1:  return Level.NORTH_DIR;
-            case 2:  return Level.WEST_DIR;
-            default: return Level.SOUTH_DIR;
-        }
+        int d0 = (angle + 64) & 0x1fe;
+        int d1 = 2;
+        do {
+            d1++;
+            d0 -= 128;
+        } while (d0 >= 0);
+        return d1 & 3;
     }
 
     /**

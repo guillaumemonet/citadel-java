@@ -58,6 +58,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     private ScreenshotAppState shots;
     private int frame;
+    private boolean autoStart;
 
     public CitadelApp(String requested) {
         this.requested = requested;
@@ -143,6 +144,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 : "dead".equals(want) ? Mode.DEAD
                 : "victory".equals(want) ? Mode.VICTORY
                 : (screens.hasIntro() ? Mode.INTRO : Mode.TITLE));
+        autoStart = "play".equals(want);
         if ("slots".equals(want)) {
             openSlots(SlotAction.LOAD, Mode.TITLE);
         }
@@ -418,6 +420,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (hud != null) {
             hud.setCullHint(hint);
         }
+        if (hudPanel != null) {
+            hudPanel.setCullHint(hint);
+        }
         if (compass != null) {
             compass.picture().setCullHint(hint);
         }
@@ -561,6 +566,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (shots != null) {
             // verification path: render a few frames, save one, and quit whatever the mode
             frame++;
+            // walk the real route through the front end, which is where the HUD is switched
+            if (autoStart && mode != Mode.PLAYING && (frame == 4 || frame == 8 || frame == 12)) {
+                handleFrontEndKey("confirm");
+            }
             if (frame == 20) {
                 shots.takeScreenshot();
             } else if (frame > 25) {
@@ -631,11 +640,28 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     // ----------------------------------------------------------------- hud
 
+    /** Dark band the readout sits on, since white text on a lit ceiling is barely there. */
+    private com.jme3.ui.Picture hudPanel;
+
     private void setupHud() {
+        float bandHeight = 56f;
+        com.jme3.texture.Image px = new com.jme3.texture.Image(
+                com.jme3.texture.Image.Format.RGBA8, 1, 1,
+                com.jme3.util.BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xb0}),
+                com.jme3.texture.image.ColorSpace.Linear);
+        hudPanel = new com.jme3.ui.Picture("hudPanel");
+        hudPanel.setTexture(assetManager, new com.jme3.texture.Texture2D(px), true);
+        hudPanel.getMaterial().getAdditionalRenderState()
+                .setBlendMode(com.jme3.material.RenderState.BlendMode.Alpha);
+        hudPanel.setWidth(cam.getWidth());
+        hudPanel.setHeight(bandHeight);
+        hudPanel.setPosition(0, cam.getHeight() - bandHeight);
+        guiNode.attachChild(hudPanel);
+
         hud = new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));
-        hud.setSize(16f);
+        hud.setSize(19f);
         hud.setColor(ColorRGBA.White);
-        hud.setLocalTranslation(10f, cam.getHeight() - 10f, 0f);
+        hud.setLocalTranslation(12f, cam.getHeight() - 8f, 1f);
         guiNode.attachChild(hud);
     }
 

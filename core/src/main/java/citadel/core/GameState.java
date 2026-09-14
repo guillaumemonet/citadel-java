@@ -312,7 +312,9 @@ public final class GameState {
      */
     private void stepLoop(float forward, float strafe, float turn) {
         if (turn != 0f) {
-            angle = (angle - Math.round(turn * ROT_SPEED)) & 511;
+            // A rising angle sweeps west, north, east, south, which is clockwise seen from above,
+            // so turning right must *increase* it. Subtracting here mirrored every control.
+            angle = (angle + Math.round(turn * ROT_SPEED)) & 511;
         }
 
         if (forward != 0f || strafe != 0f) {
@@ -853,6 +855,21 @@ public final class GameState {
         int other = level.enemyRef(cx, cy);
         if (other != 0 && other != e.slot) {
             return false;
+        }
+        // Refuse the crossing from the cell the step began in, one axis at a time. Testing only
+        // the destination's own faces lets a diagonal step slip past a sealed corner, which looks
+        // exactly like an enemy walking through a wall.
+        if (cx != fromX) {
+            int dir = (cx > fromX) ? Level.EAST_DIR : Level.WEST_DIR;
+            if (!level.isPassable(fromX, fromY, dir)) {
+                return false;
+            }
+        }
+        if (cy != fromY) {
+            int dir = (cy > fromY) ? Level.NORTH_DIR : Level.SOUTH_DIR;
+            if (!level.isPassable(cx, fromY, dir)) {
+                return false;
+            }
         }
         final int r = Enemy.RADIUS;
         final int far = Level.CELL_UNITS - r;

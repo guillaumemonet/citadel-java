@@ -79,6 +79,13 @@ the value `256 - angle` rather than the angle itself, which flips the X axis. So
 Getting this backwards mirrors east and west: the player walks fine, but every "use" lands on the
 wall behind the one they are facing. `facingAndForwardAgreeWithTheEngine` pins it down.
 
+## Controls
+
+The angle convention and the direction a control turns you are independent, and the port shipped
+once with a correct forward vector and every control mirrored. A rising angle sweeps west, north,
+east, south — clockwise seen from above — so turning right must **increase** it. `ControlsTest`
+checks each control against the compass rather than against the others.
+
 ## Two clocks
 
 The engine runs on two, and treating them as one makes the whole game run several times too fast.
@@ -109,6 +116,9 @@ feel carries over:
   penetration, so you cannot cut through a sealed corner.
 - A face is passable when its value masked with 62 is 0, 32, 38 or 54 — nothing, either door type
   open, or a broken door (`br_ChkDoors`).
+- Enemy steps are refused against the cell the step began in, one axis at a time. Testing only
+  the destination cell's own faces lets a diagonal step slip past a sealed corner, which in play
+  looks exactly like an enemy walking through a wall.
 - Columns 1, 2 and 18 block a 208-unit box around the cell centre; column 3 is decorative and
   column 4 is a teleport pad (`.br2_COLUMN2`).
 - Doors open by themselves when the player stands in an adjacent cell, unless that cell carries
@@ -126,7 +136,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 50 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 54 tests covering parsing, movement,
 doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.

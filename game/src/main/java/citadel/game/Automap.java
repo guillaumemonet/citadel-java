@@ -62,6 +62,11 @@ public final class Automap {
         return picture;
     }
 
+    /** Side of the panel in screen pixels, so other HUD bits can sit clear of it. */
+    public float side() {
+        return picture.getLocalScale().y;
+    }
+
     public boolean isVisible() {
         return visible;
     }

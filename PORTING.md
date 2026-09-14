@@ -130,11 +130,12 @@ Done:
 - the level clock, low-energy warning, death, and the automap
 - projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
 - saving and loading in the original 768 byte Savegame.DAT format
+- the compass needle, and in-flight object sprites resolved to their real 16x16 grid
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- compass and the original HUD layout; the menu and briefing screens (`SERVER`)
+- the original HUD layout; the menu and briefing screens (`SERVER`)
 - playing the intro in-game, and the death sequence
 
 ## Saves
@@ -240,8 +241,9 @@ A fireball that finishes an enemy leaves it burning rather than simply dead. Wea
 `DamageWeapon` knocks 0 or 1 off the condition per shot, and a weapon at 0 refuses to fire.
 
 Known gaps:
+- which of the 32 object sprites goes with which projectile type is paired by eye, not read from
+  the offset table
 
-- in-flight object sprites (projectiles, flames, explosions) have provisional sizes
 - knockback is decoded (enemy bytes 14/15) but not applied
 - enemy handguns are hitscan in the original too, so those enemies get a 25 frame reload to keep
   a roomful of them from emptying an energy bar in seconds

@@ -47,6 +47,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private SoundSystem sound;
     private BitmapText hud;
     private Automap automap;
+    private Compass compass;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
     private float mouseTurn;
@@ -117,6 +118,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         setupHud();
         automap = new Automap(assetManager, cam.getWidth(), cam.getHeight());
         guiNode.attachChild(automap.picture());
+        compass = new Compass(assetManager, cam.getWidth(), cam.getHeight(),
+                automap.side());
+        guiNode.attachChild(compass.picture());
         syncCamera();
 
         String shotDir = System.getProperty("citadel.screenshot");
@@ -376,6 +380,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         geometry.syncEnemies(game);
         geometry.syncProjectiles(game);
         automap.update(game);
+        compass.update(game);
         sound.serve(game);
         syncCamera();
         updateHud();

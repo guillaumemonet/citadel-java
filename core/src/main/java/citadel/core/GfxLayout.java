@@ -125,17 +125,15 @@ public final class GfxLayout {
      * so these are narrow sprites stacked inside tiles 70 and 71. Verify against the dumped PNGs.
      */
     public static List<Entry> objects() {
-        int[] offs = {
-                70 * TILE - 16, 70 * TILE,
-                70 * TILE + HALF - 16, 70 * TILE + HALF,
-                70 * TILE + STRIDE * 48 - 16, 70 * TILE + STRIDE * 48,
-                70 * TILE + STRIDE * 16 - 16, 70 * TILE + STRIDE * 16, 71 * TILE + HALF + 32,
-                71 * TILE + HALF - 16, 71 * TILE + HALF, 71 * TILE + HALF + 16,
-                70 * TILE + 32, 70 * TILE + HALF + 32, 71 * TILE, 71 * TILE + 32,
-        };
         List<Entry> out = new ArrayList<Entry>();
-        for (int i = 0; i < offs.length; i++) {
-            out.add(new Entry("object", i, offs[i], 32, 32, "provisional size"));
+        int i = 0;
+        for (int tile = 70; tile <= 71; tile++) {
+            for (int col = 0; col < 4; col++) {
+                for (int row = 0; row < 4; row++) {
+                    out.add(new Entry("object", i++,
+                            tile * TILE + col * 16 * STRIDE + row * 16, 16, 16, ""));
+                }
+            }
         }
         return out;
     }

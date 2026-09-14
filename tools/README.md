@@ -1,4 +1,4 @@
-# Citadel asset converter
+| `gfx/complexN/` | 158 PNGs per complex# Citadel asset converter
 
 Converts the original 1995 Amiga data files into formats a jMonkeyEngine port can load: PNG
 textures and sprites, WAV sound effects, and readable dumps of the level data.
@@ -85,14 +85,17 @@ Sizes per group, from the offset tables:
 
 - walls, 27 textures of 64x64 (`sv_WallOffsets`; a 28th slot is a scratch buffer)
 - columns, 8 of 32x64 then 16 of 32x32, then 4 corpse sprites (`sv_CollumnOffsets`)
-- items, 20 of 32x32; in-flight objects, 16 more (`sv_ItemOffsets`)
+- items, 20 of 32x32 (`sv_ItemOffsets`)
+- in-flight objects, 32 of 16x16: a 4 by 4 grid in each of tiles 70 and 71
 - blood, 3 decals of 64x64 then 4 wall plaques of 32x32 (`sv_BloodOffsets`)
 - enemy species 1, 24 frames of 32x64; species 2, 25 frames (`sv_Enemy1Offsets`, `sv_Enemy2Offsets`)
 
 `sv_EnemyDirTab` maps (view direction, walk phase) onto enemy frames: 6 directions of 4 phases.
 
-The in-flight object sizes are still provisional; the tables adjust those offsets by ±16 bytes,
-which is vertical, so they are stacked sub-sprites inside tiles 70 and 71.
+The in-flight objects are 16x16, packed four by four into tiles 70 and 71. The +/-16 adjustments
+in the offset table are the row steps of that grid, and extracting on it yields clean isolated
+sprites: flames, sparks and impact marks. Which of the 32 belongs to which projectile type has
+not been worked out from the table, so the renderer pairs them by eye.
 
 ## Levels: `LEVELnnX.MAP`
 

@@ -126,6 +126,35 @@ Worth knowing when reading a map dump: the editor sets plaque bits freely, and o
 decode: 155 rows of 36, where row i is screen row i / 5 in plane i % 5, and the six stages sit
 six bytes apart within each row. The converter writes them as `bomb_00.png` to `bomb_05.png`.
 
+### The status panel: `WINDOW1.RAW`, `NUMBERS.RAW`, `FONTS01.FNT`
+
+Three files sitting beside the `.VIR` data that nothing had read. Each one's size is the proof of
+what it is, against the `equ` declarations in the engine:
+
+| file | bytes | label | contents |
+|---|---|---|---|
+| `WINDOW1.RAW` | 40 000 = `$9c40` | `screen ;($9c40 razem)` | a whole 320x200 screen, five interleaved bitplanes |
+| `NUMBERS.RAW` | 430 = `$1ae` | `sv_Numbers` | counter digits |
+| `FONTS01.FNT` | 768 = `$300` | `sv_Fonts` | the message font |
+
+`WINDOW1.RAW` is the status panel: a carved border around a black hole where the view goes. The
+hole sits at `sv_Leftoffset * 8 = 64` across and `sv_Upoffset = 16` down and is 192 by 128, with
+the artwork clearing two extra pixels all round for its bevel.
+
+`NUMBERS.RAW` holds two sets of digits. `tc_DrawCounter` reads a word per row and steps
+`lea 20(a5),a5`, so the first 360 bytes are ten digits of 16 by 18. The 70 that follow are what
+`tc_DrawCardCnt` uses for the card counts: it indexes them by the count itself and steps
+`addi #10,d0`, which makes them ten digits of 8 by 7. They are not a bar graph, which is what
+they look like until you draw them.
+
+Both are one bitplane. The engine ORs the set bits in with a colour and leaves the cleared ones
+showing the panel behind, so a set bit is the plate and the digit itself is the hole.
+
+`FONTS01.FNT` is an ordinary 8 by 8 font: 96 glyphs of 8 bytes, ASCII from space to DEL.
+
+The converter writes `hud.png`, `hud_digits.png`, `hud_small_digits.png` and `hud_font.png`; the
+one-bitplane ones come out white on transparent, ready to be tinted.
+
 ### Animation: `sv_AnimOffsets`
 
 `sv_DoAnims` rewrites table entries once per pass of `MAIN_LOOP`:
@@ -282,7 +311,9 @@ the rest. Worth confirming against `IntroReplayer_125.ss` before building on it.
 - `Store/ROTTABLE.DAT`, 64 pre-sorted cell visibility lists, one per view angle. The software
   renderer walks these back to front; a jMonkeyEngine port does its own culling and will not need
   them.
-- `Store/IWT.DAT`, `TABLES.DAT`, `SINTABLE.DAT`: engine lookup tables and screen furniture.
+- `Store/IWT.DAT`, `TABLES.DAT`, `SINTABLE.DAT`: engine lookup tables. `SINTABLE.DAT` is 640
+  bytes, exactly the `$280` of `sv_sinus`, and `ROTTABLE.DAT` is 16 882, exactly the `$41f2` of
+  `sv_RotTable` — a port that does its own trigonometry and culling needs neither.
 - `Store/TEXT.POL` / `TEXT.ENG` / `TEXT.GER`: in-game strings, indexed by `sv_TextOffsets`.
 - The IFF artwork under `Data/GAME/Gfx_IFF` and `Data/INTRO`. `citadel.tools.IffReader` decodes
   ILBM already and can be run standalone on any of those files.

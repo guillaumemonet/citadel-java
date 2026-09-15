@@ -2,6 +2,7 @@ package citadel.tools;
 
 import citadel.core.BombGfx;
 import citadel.core.GfxLayout;
+import citadel.core.HudGfx;
 import citadel.core.Io;
 import citadel.core.MapFile;
 import citadel.core.Palette;
@@ -146,6 +147,7 @@ public final class Convert {
                         e.fileName(), e.offset, e.width, e.height, e.note));
             }
             writeBomb(dir, pal, log);
+            writeHud(dir, gfxDir, pal, log);
             log.append('\n');
             System.out.printf("complex %d: %d graphics written, %d empty slots skipped%n",
                     complex, written, blank);
@@ -188,6 +190,74 @@ public final class Convert {
                     name, "Bomba", BombGfx.WIDTH, BombGfx.HEIGHT,
                     "warhead gauge, " + (stage + 1) + " of 6 sections"));
         }
+    }
+
+    /**
+     * WINDOW1.RAW, NUMBERS.RAW and FONTS01.FNT: the status panel and its two fonts. All three sit
+     * beside the .VIR files and none of them had been read before; see {@link HudGfx}.
+     *
+     * The digits, the card bar and the font are one bitplane each, so they come out as white on
+     * transparent and are tinted where they are drawn, which is what the engine does with the
+     * colour in d1.
+     */
+    private void writeHud(File dir, File gfxDir, Palette pal, StringBuilder log) throws IOException {
+        if (!new File(gfxDir, "WINDOW1.RAW").isFile()) {
+            return;
+        }
+        HudGfx hud = HudGfx.loadFrom(gfxDir);
+
+        int[] px = hud.panel();
+        int[] lut = pal.lut(false);
+        BufferedImage panel = new BufferedImage(HudGfx.SCREEN_W, HudGfx.SCREEN_H,
+                BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < HudGfx.SCREEN_H; y++) {
+            for (int x = 0; x < HudGfx.SCREEN_W; x++) {
+                panel.setRGB(x, y, lut[px[y * HudGfx.SCREEN_W + x] & 31]);
+            }
+        }
+        ImageIO.write(panel, "png", new File(dir, "hud.png"));
+        log.append(String.format("%-20s %7s  %2dx%-3d %s%n", "hud.png", "WINDOW1",
+                HudGfx.SCREEN_W, HudGfx.SCREEN_H, "status panel, view window at 64,16 192x128"));
+
+        ImageIO.write(mask(HudGfx.DIGIT_W * HudGfx.DIGITS, HudGfx.DIGIT_H, (x, y) -> {
+            boolean[] g = hud.digit(x / HudGfx.DIGIT_W);
+            return g[y * HudGfx.DIGIT_W + (x % HudGfx.DIGIT_W)];
+        }), "png", new File(dir, "hud_digits.png"));
+        log.append(String.format("%-20s %7s  %2dx%-3d %s%n", "hud_digits.png", "NUMBERS",
+                HudGfx.DIGIT_W, HudGfx.DIGIT_H, "ten counter digits, set bits are the plate"));
+
+        ImageIO.write(mask(HudGfx.SMALL_DIGIT_W * HudGfx.SMALL_DIGITS, HudGfx.SMALL_DIGIT_H,
+                (x, y) -> {
+                    boolean[] g = hud.smallDigit(x / HudGfx.SMALL_DIGIT_W);
+                    return g[y * HudGfx.SMALL_DIGIT_W + (x % HudGfx.SMALL_DIGIT_W)];
+                }), "png", new File(dir, "hud_small_digits.png"));
+        log.append(String.format("%-20s %7s  %2dx%-3d %s%n", "hud_small_digits.png", "NUMBERS",
+                HudGfx.SMALL_DIGIT_W, HudGfx.SMALL_DIGIT_H, "small digits, for the card counts"));
+
+        int cols = 32;
+        ImageIO.write(mask(cols * HudGfx.GLYPH_W, (HudGfx.GLYPHS / cols) * HudGfx.GLYPH_H,
+                (x, y) -> {
+                    int g = (y / HudGfx.GLYPH_H) * cols + (x / HudGfx.GLYPH_W);
+                    boolean[] bits = hud.glyph((char) (HudGfx.FIRST_GLYPH + g));
+                    return bits[(y % HudGfx.GLYPH_H) * HudGfx.GLYPH_W + (x % HudGfx.GLYPH_W)];
+                }), "png", new File(dir, "hud_font.png"));
+        log.append(String.format("%-20s %7s  %2dx%-3d %s%n", "hud_font.png", "FONTS01",
+                HudGfx.GLYPH_W, HudGfx.GLYPH_H, "96 glyphs, space to DEL, 32 to a row"));
+    }
+
+    /** A one bitplane graphic as white on transparent, ready to be tinted where it is drawn. */
+    private interface Bit {
+        boolean at(int x, int y);
+    }
+
+    private static BufferedImage mask(int w, int h, Bit bits) {
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                img.setRGB(x, y, bits.at(x, y) ? 0xffffffff : 0x00000000);
+            }
+        }
+        return img;
     }
 
     private BufferedImage paletteStrip(Palette pal) {

@@ -41,8 +41,6 @@ public final class Enemy {
     public int energy;
     public int state;
     public int counter;
-    /** Walk animation phase, 0..3, advanced as the enemy moves. */
-    public int phase;
     /** Frames left before this one can shoot again; see GameState.ENEMY_RELOAD. */
     public int reload;
 
@@ -76,19 +74,40 @@ public final class Enemy {
     }
 
     /**
-     * Which of the six drawn view directions this enemy presents to the player, from
-     * sv_EnemyDirTab: the difference between where it faces and where the player is, in sixths
-     * of a turn.
+     * Widths of the six view sectors, from {@code sv_EDirSub: dc.w 128,64+32,64,64,64,64+32}.
+     * They are deliberately uneven: front and back get a quarter and three sixteenths of the
+     * turn, the four side views a sixteenth each.
      */
-    public int viewDirection(int playerX, int playerY) {
-        int toPlayer = GameState.angleTowards(playerX - x, playerY - y);
-        int rel = (angle - toPlayer + 512 + 43) & 511;
-        return Math.min(5, rel * 6 / 512);
+    private static final int[] VIEW_SECTORS = {128, 96, 64, 64, 64, 96};
+
+    /**
+     * Which of the six drawn view directions this enemy presents, from de_WALK: the difference
+     * between where it faces and where the *camera* looks, biased by 64 so the front view is
+     * centred, then walked down sv_EDirSub.
+     *
+     * The camera angle rather than the bearing to the player is what the original uses, and it
+     * matters: the sprite is screen aligned, so an enemy near the edge of the view shows the same
+     * side as one dead ahead.
+     */
+    public int viewDirection(int viewAngle) {
+        int rel = (angle - viewAngle + 64 + 512) & 0x1fe;
+        for (int d = 0; d < VIEW_SECTORS.length; d++) {
+            rel -= VIEW_SECTORS[d];
+            if (rel < 0) {
+                return d;
+            }
+        }
+        return VIEW_SECTORS.length - 1;
     }
 
-    /** Sprite frame for the current facing and walk phase, via sv_EnemyDirTab. */
-    public int frame(int playerX, int playerY) {
-        int dir = viewDirection(playerX, playerY);
-        return GfxLayout.ENEMY_DIR_TAB[dir * 4 + (phase & 3)] / 4;
+    /**
+     * Sprite frame for the current facing and walk phase, via sv_EnemyDirTab.
+     *
+     * The walk phase is sv_WalkState, which is global and advanced once per pass of MAIN_LOOP by
+     * sv_DoAnims, so every enemy on screen steps in time.
+     */
+    public int frame(int viewAngle, int walkPhase) {
+        int dir = viewDirection(viewAngle);
+        return GfxLayout.ENEMY_DIR_TAB[dir * 4 + (walkPhase & 3)] / 4;
     }
 }

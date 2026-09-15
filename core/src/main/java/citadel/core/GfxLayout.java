@@ -200,6 +200,47 @@ public final class GfxLayout {
         return (cellValue < 17) ? ColumnKind.RAISED : ColumnKind.LOWERED;
     }
 
+    /**
+     * Animated graphics, from sv_DoAnims and the sv_AnimOffsets table it reads.
+     *
+     * Once per pass of MAIN_LOOP the engine rewrites a few entries of the offset tables, so the
+     * same cell value draws a different sprite each pass: torches gutter, screens flicker. Two
+     * frames for the wall and the plaque, four for each of the three columns.
+     *
+     * Cell values are 1-based as everywhere else, so the sprite indices here are one less.
+     */
+    /**
+     * The one animated wall: {@code move.l 4(a1,d0.w),23*4(a2)} rewrites sv_WallOffsets[23] with
+     * tile 23 or tile 24, so wall sprite 23 alternates with sprite 24.
+     */
+    public static final int ANIMATED_WALL_SPRITE = 23;
+
+    /** sv_BloodOffsets[5] alternates between the two halves that are blood sprites 5 and 6. */
+    public static final int ANIMATED_PLAQUE_SPRITE = 5;
+
+    /**
+     * The three animated columns. Each cycles through four consecutive sprites, and each base is
+     * the first of its group of four: sv_CollumnOffsets entries 4, 12 and 20.
+     */
+    public static boolean isAnimatedColumnSprite(int sprite) {
+        return sprite == 4 || sprite == 12 || sprite == 20;
+    }
+
+    /** Sprite for a column at a given phase; unchanged for the ones that do not animate. */
+    public static int columnSprite(int sprite, int phase) {
+        return isAnimatedColumnSprite(sprite) ? sprite + (phase & 3) : sprite;
+    }
+
+    /** Sprite for a wall face at a given phase. Only sprite 23 animates, over two frames. */
+    public static int wallSprite(int sprite, int phase) {
+        return (sprite == ANIMATED_WALL_SPRITE) ? sprite + (phase & 1) : sprite;
+    }
+
+    /** Sprite for a wall plaque at a given phase. Only sprite 5 animates, over two frames. */
+    public static int plaqueSprite(int sprite, int phase) {
+        return (sprite == ANIMATED_PLAQUE_SPRITE) ? sprite + (phase & 1) : sprite;
+    }
+
     /** sv_EnemyDirTab: frame index (already multiplied by 4) per view direction and walk phase. */
     public static final int[] ENEMY_DIR_TAB = {
             52, 56, 52, 56,

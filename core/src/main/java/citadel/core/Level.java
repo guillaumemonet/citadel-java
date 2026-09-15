@@ -288,9 +288,12 @@ public final class Level {
 
         EnemySpawn(MapFile.Enemy e) {
             slot = e.index;
-            // Move_Enemy picks the stat block with btst #0 on the flags byte; bit 7 is unrelated,
-            // it only tells the renderer to draw this one behind a column.
-            species = e.flags & 1;
+            // EnemyHitServe and dr_DrawEnemy both pick with btst #0 on the flags byte, and both
+            // take the SET bit to mean the first species: beq.s .me01 falls through to
+            // sv_LevelData+4, and bne.s de_enemy2 skips the lea of sv_Enemy2Offsets. So the bit
+            // is inverted relative to the index used here. Bit 7 is unrelated; it only tells the
+            // renderer to draw this one behind a column.
+            species = (e.flags & 1) ^ 1;
             worldX = e.x;
             worldY = e.y;
             energy = e.energy;

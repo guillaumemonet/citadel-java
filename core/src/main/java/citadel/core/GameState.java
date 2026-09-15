@@ -112,6 +112,15 @@ public final class GameState {
     private float beepCountdown;
     /** True when the last move ran into something hard enough to count, per br_BumpWall. */
     private boolean bumped;
+    /**
+     * Texture animation phase, advanced once per pass of MAIN_LOOP by sv_DoAnims. Walls and
+     * columns that animate pick their sprite from this.
+     */
+    private int animPhase;
+
+    public int animPhase() {
+        return animPhase;
+    }
 
     public boolean isVisited(int x, int y) {
         return Level.inside(x, y) && visited[x + y * Level.GRID];
@@ -336,6 +345,7 @@ public final class GameState {
             }
         }
 
+        animPhase++;
         serveDoors();
         takeItems();
         markVisited();
@@ -826,7 +836,6 @@ public final class GameState {
     private void wander(Enemy e) {
         for (int attempt = 0; attempt < 3; attempt++) {
             if (stepEnemy(e)) {
-                e.phase = (e.phase + 1) & 3;
                 if (rnd.nextInt(256) >= 0xf0) {
                     e.angle = (e.angle + (rnd.nextInt(127) - 63) * 2) & 511;
                 }

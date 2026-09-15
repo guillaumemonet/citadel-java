@@ -87,7 +87,8 @@ Sizes per group, from the offset tables:
 - columns, 8 of 32x64 then 16 of 32x32, then 4 corpse sprites (`sv_CollumnOffsets`)
 - items, 20 of 32x32 (`sv_ItemOffsets`)
 - in-flight objects, 32 of 16x16: a 4 by 4 grid in each of tiles 70 and 71
-- blood, 3 decals of 64x64 then 4 wall plaques of 32x32 (`sv_BloodOffsets`)
+- blood, 3 decals of 64x64 then 4 plaque entries (`sv_BloodOffsets`); the plaque entries are
+  extracted as 32x32 quadrants of tile 38, which the compositor says is **wrong** - see below
 - enemy species 1, 24 frames of 32x64; species 2, 25 frames (`sv_Enemy1Offsets`, `sv_Enemy2Offsets`)
 
 `sv_EnemyDirTab` maps (view direction, walk phase) onto enemy frames: 6 directions of 4 phases.
@@ -96,6 +97,33 @@ The in-flight objects are 16x16, packed four by four into tiles 70 and 71. The +
 in the offset table are the row steps of that grid, and extracting on it yields clean isolated
 sprites: flames, sparks and impact marks. Which of the 32 belongs to which projectile type has
 not been worked out from the table, so the renderer pairs them by eye.
+
+### Decals: `sv_BloodOffsets`
+
+`dr_AddBlood` and `dr_AddTables` overlay a decal onto a wall by copying the full 4160-byte tile
+into the scratch buffer at `sv_WallOffsets[27]`, writing every non-zero byte of the decal over it
+as it goes (`AB_loop1`, 260 iterations of four longwords). Blood is settled: the stain value in
+bits 6..7 of the wall byte, less one, picks one of the three 64x64 decals in tiles 35..37.
+
+The four plaque entries are not settled. Their offsets are `38*65*64` plus 0, 32, `65*32` and
+`65*32+32`, and since the copy reads a full tile from wherever it starts, those are sliding
+windows over tile 38 rather than quadrants of it. Tile 38 has a vertical period of 32 and holds
+two different images side by side, so the windows at +0 and +32 read alike, as do the two at
+`65*32`. That would make the `sv_AnimOffsets` entry for `sv_BloodOffsets[5]` a no-op, which it
+plainly is not meant to be. Until that is resolved the renderer draws no plaques at all.
+
+### Animation: `sv_AnimOffsets`
+
+`sv_DoAnims` rewrites table entries once per pass of `MAIN_LOOP`:
+
+| rewritten | cycle |
+|---|---|
+| `sv_WallOffsets[23]` | tile 23, tile 24 |
+| `sv_BloodOffsets[5]` | two windows in tile 38 |
+| `sv_CollumnOffsets[4]` | sprites 4, 5, 6, 7 |
+| `sv_CollumnOffsets[12]` | sprites 12, 13, 14, 15 |
+| `sv_CollumnOffsets[20]` | sprites 20, 21, 22, 23 |
+| `sv_WalkState` | 0, 2, 4, 6, the enemy walk phase shared by every enemy |
 
 ## Levels: `LEVELnnX.MAP`
 

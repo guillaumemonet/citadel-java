@@ -147,8 +147,8 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 54 tests covering parsing, movement,
-doors, switches, pickups, line of sight and enemy movement. The one that earns its keep is a
+`gradle :core:test` runs headless against the shipped maps: 60 tests covering parsing, movement,
+doors, switches, pickups, line of sight, enemy movement and the animation tables. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
 
@@ -171,6 +171,7 @@ Done:
 - projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
 - saving and loading in the original 768 byte Savegame.DAT format
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
+- texture animation: the animated wall, the three animated columns, and the shared enemy walk phase
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -178,6 +179,10 @@ Done:
 Not started:
 
 - the original HUD layout and the briefing screens (`SERVER`)
+- wall decals: blood stains (`dr_AddBlood`) and plaques / card slots (`dr_AddTables`)
+- full-screen effects: `TELEPORT` stretch, `sv_MAKE_SZUM` static, `do_FLASH`, `p_FadeColors`
+- `DRAW_HEART` / `EXCITE`, `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
+- `ci_DrawWeapon`'s chaos dissolve when the weapon in hand changes
 
 ## Saves
 
@@ -229,6 +234,43 @@ Message numbers are verified against their call sites at 40, 41, 44, 52, 53, 54,
 messages need no table of their own: every branch of `Take_Items` computes an index that works out
 to the item value itself.
 
+## Animation
+
+`sv_DoAnims` runs once per pass of `MAIN_LOOP` and animates by rewriting offset tables in place,
+so the same cell value draws a different sprite from one pass to the next. It advances four
+counters at once:
+
+| table entry | frames | what it is |
+|---|---|---|
+| `sv_WallOffsets[23]` | tiles 23, 24 | the one animated wall texture |
+| `sv_BloodOffsets[5]` | two windows in tile 38 | a plaque; not drawn yet, see below |
+| `sv_CollumnOffsets[4]`, `[12]`, `[20]` | four sprites each | three animated columns |
+| `sv_WalkState` | 0, 2, 4, 6 | the enemy walk phase |
+
+`sv_WalkState` is a single global, so every enemy on screen steps in time; the port keeps one
+counter on `GameState` and feeds it to all four. `LEVEL01A` alone has 48 animated wall faces and
+121 animated columns, so this is not a subtle effect.
+
+The animated wall faces are batched into one mesh with a swappable material rather than one
+geometry each; the columns are already billboards, so they only change material.
+
+## Decals, and what is still unclear about them
+
+`dr_AddBlood` and `dr_AddTables` composite a decal over a wall by copying the whole 4160-byte
+tile into the scratch buffer at `sv_WallOffsets[27]` and overlaying every non-zero byte of the
+decal on the way past (`AB_loop1`). Blood is straightforward: the stain value in bits 6..7 of the
+wall byte selects one of the three 64x64 decals in tiles 35..37.
+
+Plaques are not. `dr_AddTables` does `addq #2,d5` so a 2-bit plaque value of 1..3 selects
+`sv_BloodOffsets` entries 3..5, whose offsets are `38*65*64` plus 0, 32 and `65*32`. Because the
+copy is a full tile read from an arbitrary start, those are **sliding windows over tile 38**, not
+the four 32x32 quadrants the converter currently extracts. Tile 38 turns out to be periodic with
+a vertical period of 32 and to hold two different images side by side, which makes entries 3 and
+4 read the same and entries 5 and 6 read the same — leaving the `sv_BloodOffsets[5]` animation
+with nothing to alternate between. Something in that reading is still wrong, so neither blood nor
+plaques are drawn rather than drawn incorrectly. The card-reader *mechanic* is unaffected and
+works; only the wall art for it is missing.
+
 ## Projectiles
 
 `Anim_Objects` walks a table of 30 slots. Types 3, 4 and 5 are the fireball, electricity and
@@ -266,6 +308,17 @@ bit 7 is unrelated, it only asks the renderer to draw that one behind a column),
 that is reproduced. Enemies have a 300-unit radius against the player's 307, refuse to walk onto
 each other via the occupancy grid in cell byte 7, and turn at random up to three times when a step
 is blocked.
+
+**Bit 0 set means the *first* species**, which is the opposite of what it looks like. Both
+`EnemyHitServe` (`beq.s .me01` falls through to `sv_LevelData+4`) and `dr_DrawEnemy`
+(`bne.s de_enemy2` skips the `lea sv_Enemy2Offsets`) take the set bit to mean species 1, so
+`Level.EnemySpawn.species` inverts it. Getting this backwards silently swaps both the sprite sheet
+and the whole stat block, including the vulnerability mask.
+
+Which of the six views an enemy presents comes from `de_WALK`, and the sectors are deliberately
+uneven: `sv_EDirSub: dc.w 128,64+32,64,64,64,64+32`. It is measured against the **camera angle**,
+not the bearing from the enemy to the player — the sprite is screen aligned, so an enemy at the
+edge of the view shows the same side as one dead ahead.
 
 Two places take a functional equivalent rather than a transcription, both noted in the code:
 

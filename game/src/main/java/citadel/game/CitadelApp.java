@@ -623,6 +623,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (game.consumeGeometryDirty()) {
             geometry.rebuild();
         }
+        geometry.syncAnimations(game);
         geometry.syncDoors(game);
         geometry.syncEnemies(game);
         geometry.syncProjectiles(game);

@@ -64,6 +64,9 @@ public final class LevelGeometry {
         root.setName("level:" + level.name);
         root.detachAllChildren();
         doorFaces.clear();
+        animatedColumns.clear();
+        animatedWall = null;
+        shownPhase = -1;
         enemyViews.clear();
         enemyNode = null;
         projectileNode = null;
@@ -136,6 +139,39 @@ public final class LevelGeometry {
         }
     }
 
+    /** Cells holding an animated column, and the billboard showing each one. */
+    private final Map<Integer, Geometry> animatedColumns = new HashMap<Integer, Geometry>();
+    /** Every face using the one animated wall texture, batched into a single mesh. */
+    private Geometry animatedWall;
+    private int shownPhase = -1;
+
+    /**
+     * sv_DoAnims: once per pass of MAIN_LOOP the engine rewrites a few offset-table entries, so
+     * the same cell draws a different sprite. Torches gutter, screens flicker. Two frames for the
+     * one animated wall, four for each animated column.
+     */
+    public void syncAnimations(citadel.core.GameState game) {
+        int phase = game.animPhase();
+        if (phase == shownPhase) {
+            return;
+        }
+        shownPhase = phase;
+
+        for (Map.Entry<Integer, Geometry> e : animatedColumns.entrySet()) {
+            int cell = e.getKey();
+            int still = GfxLayout.spriteIndexFor(
+                    level.column(cell % Level.GRID, cell / Level.GRID));
+            int sprite = GfxLayout.columnSprite(still, phase);
+            if (assets.exists(complex, "column", sprite)) {
+                e.getValue().setMaterial(assets.material(complex, "column", sprite, true));
+            }
+        }
+        int wall = GfxLayout.wallSprite(GfxLayout.ANIMATED_WALL_SPRITE, phase);
+        if (animatedWall != null && assets.exists(complex, "wall", wall)) {
+            animatedWall.setMaterial(assets.material(complex, "wall", wall, false));
+        }
+    }
+
     private void raise(int x, int y, int dir, float lift) {
         Geometry g = doorFaces.get(faceKey(x, y, dir));
         if (g != null) {
@@ -148,6 +184,8 @@ public final class LevelGeometry {
     private Node buildWalls() {
         Node node = new Node("walls");
         Map<Integer, QuadBatch> byTexture = new HashMap<Integer, QuadBatch>();
+        QuadBatch animated = new QuadBatch();
+        int animatedFaces = 0;
         for (int y = 0; y < Level.GRID; y++) {
             for (int x = 0; x < Level.GRID; x++) {
                 for (int d = 0; d < 4; d++) {
@@ -165,6 +203,12 @@ public final class LevelGeometry {
                     if (level.doorState(x, y, d) != Level.DoorState.NONE) {
                         doorTextures.put(key, tex);
                         addDoorFace(node, x, y, d, tex);
+                        continue;
+                    }
+                    if (tex == GfxLayout.ANIMATED_WALL_SPRITE) {
+                        // one mesh for all of them, so the phase is one material swap a pass
+                        addWallFace(animated, x, y, d, level.wallMirrored(x, y, d));
+                        animatedFaces++;
                         continue;
                     }
                     QuadBatch batch = byTexture.get(tex);
@@ -185,6 +229,13 @@ public final class LevelGeometry {
             Geometry g = new Geometry("wall:" + tex, e.getValue().toMesh());
             g.setMaterial(mat);
             node.attachChild(g);
+        }
+
+        if (animatedFaces > 0) {
+            animatedWall = new Geometry("wall:animated", animated.toMesh());
+            animatedWall.setMaterial(assets.material(
+                    complex, "wall", GfxLayout.ANIMATED_WALL_SPRITE, false));
+            node.attachChild(animatedWall);
         }
         return node;
     }
@@ -345,7 +396,7 @@ public final class LevelGeometry {
                 continue;
             }
             String group = (e.species == 0) ? "enemy1" : "enemy2";
-            int frame = e.frame(game.posX, game.posY);
+            int frame = e.frame(game.angle, game.animPhase());
             if (!assets.exists(complex, group, frame)) {
                 frame = 0;
             }
@@ -368,28 +419,32 @@ public final class LevelGeometry {
     private void addColumn(Node node, int x, int y, int cellValue) {
         int sprite = GfxLayout.spriteIndexFor(cellValue);
         GfxLayout.ColumnKind kind = GfxLayout.columnKind(cellValue);
+        Geometry g;
         switch (kind) {
             case FULL:
-                addSprite(node, "column", sprite, x, y, 0.6f, WALL_H, WALL_H / 2f, "col");
+                g = addSprite(node, "column", sprite, x, y, 0.6f, WALL_H, WALL_H / 2f, "col");
                 break;
             case RAISED:
-                addSprite(node, "column", sprite, x, y, 0.6f, WALL_H / 2f, WALL_H * 0.75f, "col");
+                g = addSprite(node, "column", sprite, x, y, 0.6f, WALL_H / 2f, WALL_H * 0.75f, "col");
                 break;
             default:
-                addSprite(node, "column", sprite, x, y, 0.6f, WALL_H / 2f, WALL_H * 0.25f, "col");
+                g = addSprite(node, "column", sprite, x, y, 0.6f, WALL_H / 2f, WALL_H * 0.25f, "col");
                 break;
+        }
+        if (g != null && GfxLayout.isAnimatedColumnSprite(sprite)) {
+            animatedColumns.put(x + y * Level.GRID, g);
         }
     }
 
-    private void addSprite(Node node, String group, int sprite, int cx, int cy,
-                           float w, float h, float centreY, String name) {
-        addSpriteAt(node, group, sprite, cx + 0.5f, cy + 0.5f, w, h, centreY, name);
+    private Geometry addSprite(Node node, String group, int sprite, int cx, int cy,
+                               float w, float h, float centreY, String name) {
+        return addSpriteAt(node, group, sprite, cx + 0.5f, cy + 0.5f, w, h, centreY, name);
     }
 
-    private void addSpriteAt(Node node, String group, int sprite, float wx, float wz,
-                             float w, float h, float centreY, String name) {
+    private Geometry addSpriteAt(Node node, String group, int sprite, float wx, float wz,
+                                 float w, float h, float centreY, String name) {
         if (sprite < 0 || !assets.exists(complex, group, sprite)) {
-            return;
+            return null;
         }
         Geometry g = new Geometry(name, new Quad(w, h));
         g.setMaterial(assets.material(complex, group, sprite, true));
@@ -401,6 +456,7 @@ public final class LevelGeometry {
         pivot.addControl(new BillboardControl());
         pivot.setLocalTranslation(new Vector3f(wx, centreY, wz));
         node.attachChild(pivot);
+        return g;
     }
 
     // ------------------------------------------------------------ batching

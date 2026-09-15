@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 93 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 97 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -182,7 +182,7 @@ Done:
 - `DrawBomb`, the warhead assembly gauge, and the six messages that go with it
 - `CheckCodes`, all seven cheats
 - `sv_Death`, the blood that runs down the screen, and `p_FadeColors` after it
-- the original status panel, with every widget where the engine puts it
+- the original status panel, with every widget where the engine puts it, and `sc_DoScroll`
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -190,7 +190,6 @@ Done:
 Not started:
 
 - the briefing screens (`SERVER`)
-- the message line does not scroll in from the right the way `sc_DoScroll` does
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 
 ## Saves
@@ -349,8 +348,33 @@ The counters are white and turn red when the reading is low (`moveq #16,d1` agai
 is just as well, since its 1111 would send `divu #100` off the end of the digit table.
 
 The port draws the strip across the bottom of a full screen view rather than framing the 192 by
-128 window the panel was built around. The message is printed rather than scrolled in from the
-right, which is what `sc_DoScroll` does with a column of `roxl`.
+128 window the panel was built around.
+
+### The message line
+
+`sc_DoScroll` has two speeds, and that is what makes it readable. With a message still to print it
+shifts a whole byte and pokes the next glyph into the rightmost column:
+
+```asm
+.sc_MoveText:  lea sv_ScrollArea-34,a2
+               REPT 33
+               move.b 1(a2),(a2)+      ;eight pixels at a time
+               ENDR
+```
+
+With nothing left to say it shifts a single pixel instead, rolling each row through the carry:
+
+```asm
+.sc_DS1:  move #%00000,CCR
+          REPT 17
+          roxl -(a1)                   ;one pixel
+          ENDR
+```
+
+So a message is pushed in at a character a frame and then drifts out at a pixel a frame, taking
+five and a half seconds to clear the window. `sv_ScrollArea` is the address one past the right
+hand end, and it lands in bitplane 1 — so subtracting the 34 bytes puts the window at byte 6 of
+bitplane 0: x 48 to 319 on row 190, drawn in palette index 1.
 
 ## The warhead gauge
 

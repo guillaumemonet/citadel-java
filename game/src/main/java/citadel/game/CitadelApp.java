@@ -779,6 +779,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (!holdingCamera) {
             syncCamera();
         }
+        lastTpf = tpf;
         updateHud();
     }
 
@@ -922,6 +923,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private String message = "";
     private float messageTimer;
 
+    /** tpf of the frame being served, for the readouts that run on the VBLANK clock. */
+    private float lastTpf;
+
     private void updateHud() {
         List<String> events = game.drainLog();
         if (!events.isEmpty()) {
@@ -935,7 +939,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         citadel.core.Inventory inv = game.inventory;
         if (hudPanelView != null) {
-            hudPanelView.update(game, message.toUpperCase());
+            hudPanelView.update(game, message.toUpperCase(), lastTpf);
         }
         // the panel carries energy, ammunition, the cards and the message now, so this line is
         // only the things the original never showed: the clock, where you are, and what is in hand

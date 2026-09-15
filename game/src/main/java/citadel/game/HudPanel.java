@@ -50,11 +50,12 @@ public final class HudPanel {
     public static final int WEAPON_X = 184, WEAPON_ROW = 161;
     public static final int AMMO_X = 224, AMMO_ROW = 168;
     public static final int CARD_X = 312, CARD_ROW = 163;
-    public static final int TEXT_X = 0, TEXT_ROW = 190;
 
     /** {@code moveq #16,d1} in Test_Counters, and {@code moveq #9,d1} when energy runs low. */
     private static final int WHITE = 0xffffffff;
     private static final int RED = 0xffff1100;
+    /** sv_ScrollArea sits in bitplane 0, so the message line is palette index 1. */
+    private static final int SCROLL_COLOUR = 0xffaaaaaa;
 
     private final float scale;
     private final HudGfx gfx;
@@ -63,11 +64,15 @@ public final class HudPanel {
     private final Texture2D overlayTexture;
     private final ByteBuffer overlayPixels;
     private final int[] argb = new int[PANEL_W * PANEL_H];
+    private final citadel.core.ScrollLine scroll;
     private String shownState = "";
+    private String shownMessage = "";
+    private float vblanks;
 
     public HudPanel(AssetManager assetManager, Assets assets, int complex, int screenWidth)
             throws Exception {
         gfx = HudGfx.loadFrom(new File(assets.dataRoot(), "GAME/Gfx_VIR"));
+        scroll = new citadel.core.ScrollLine(gfx);
         scale = screenWidth / (float) PANEL_W;
 
         java.awt.image.BufferedImage whole = javax.imageio.ImageIO.read(
@@ -124,14 +129,36 @@ public final class HudPanel {
                 (HudGfx.SCREEN_H - panelRow - h) * scale, CitadelApp.Z_FURNITURE);
     }
 
-    /** Redraws the counters, the card counts and the message line, when any of them changes. */
-    public void update(GameState game, String message) {
+    /**
+     * Advances the message line and redraws the readouts.
+     *
+     * sc_DoScroll runs every VBLANK frame, so the line is on that clock rather than the render
+     * one; the counters only change when a reading does.
+     */
+    public void update(GameState game, String message, float tpf) {
+        if (!message.equals(shownMessage)) {
+            shownMessage = message;
+            scroll.show(message);
+        }
+        vblanks += tpf * GameState.FRAMES_PER_SECOND;
+        boolean moved = false;
+        while (vblanks >= 1f) {
+            vblanks -= 1f;
+            if (!scroll.isEmpty()) {
+                scroll.tick();
+                moved = true;
+            }
+        }
+        redraw(game, moved);
+    }
+
+    private void redraw(GameState game, boolean scrolled) {
         int energy = game.inventory.energyReading();
         int ammo = game.inventory.ammoReading();
         String state = energy + "/" + ammo + "/" + game.inventory.current + "/" + game.inventory.cardReading(0)
                 + "," + game.inventory.cardReading(1) + "," + game.inventory.cardReading(2)
-                + "/" + game.isEnergyCritical() + "/" + message;
-        if (state.equals(shownState)) {
+                + "/" + game.isEnergyCritical();
+        if (state.equals(shownState) && !scrolled) {
             return;
         }
         shownState = state;
@@ -149,7 +176,8 @@ public final class HudPanel {
             smallDigit(CARD_X, CARD_ROW + card * (HudGfx.SMALL_DIGIT_H + 1),
                     clamp(game.inventory.cardReading(card)));
         }
-        text(TEXT_X + 2, TEXT_ROW, message);
+        blit(scroll.pixels(), citadel.core.ScrollLine.WIDTH, citadel.core.ScrollLine.HEIGHT,
+                citadel.core.ScrollLine.X, citadel.core.ScrollLine.ROW, SCROLL_COLOUR);
 
         // argb is top down like the panel rows; the texture is bottom up like the strip
         overlayPixels.clear();
@@ -184,16 +212,6 @@ public final class HudPanel {
 
     private void smallDigit(int x, int row, int value) {
         blit(gfx.smallDigit(value), HudGfx.SMALL_DIGIT_W, HudGfx.SMALL_DIGIT_H, x, row, WHITE);
-    }
-
-    private void text(int x, int row, String s) {
-        for (int i = 0; i < s.length(); i++) {
-            int at = x + i * HudGfx.GLYPH_W;
-            if (at + HudGfx.GLYPH_W > PANEL_W) {
-                return;
-            }
-            blit(gfx.glyph(s.charAt(i)), HudGfx.GLYPH_W, HudGfx.GLYPH_H, at, row, WHITE);
-        }
     }
 
     private void blit(boolean[] bits, int w, int h, int x, int row, int colour) {

@@ -406,8 +406,36 @@ public final class Convert {
                 System.out.println("screens: " + src.getName() + " skipped, " + e.getMessage());
             }
         }
+        written += writeArrow(dataRoot, dst, log);
         Io.writeText(new File(dst, "INDEX.txt"), log.toString());
         System.out.printf("screens: %d written%n", written);
+    }
+
+    /**
+     * strzalka.rawb, the arrow MAPA bobs over the chosen target. 132 bytes is 2 by 11 in six
+     * planes, and it is blitted straight into the map picture, so it borrows that palette.
+     */
+    private int writeArrow(File dataRoot, File dst, StringBuilder log) throws IOException {
+        File src = new File(dataRoot, "INTRO/GFX/strzalka.rawb");
+        File mapka = new File(dataRoot, "INTRO/GFX/MAPKA.rawb");
+        if (!src.isFile() || !mapka.isFile()) {
+            return 0;
+        }
+        int[] palette = RawScreen.load(mapka, 320, 6, 128).palette;
+        RawScreen arrow = RawScreen.load(src, 16, 6, 0);
+        int[] idx = arrow.indices();
+        BufferedImage img = new BufferedImage(arrow.width, arrow.height,
+                BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < arrow.height; y++) {
+            for (int x = 0; x < arrow.width; x++) {
+                int v = idx[y * arrow.width + x];
+                img.setRGB(x, y, (v == 0) ? 0 : palette[v & 63]);
+            }
+        }
+        ImageIO.write(img, "png", new File(dst, "arrow.png"));
+        log.append(String.format("%-24s %4dx%-4d  %d       %s%n",
+                "arrow.png", arrow.width, arrow.height, 6, "MAPA cursor, map palette"));
+        return 1;
     }
 
     /** path, width, planes, trailing palette bytes, "ham" or "-", note. */

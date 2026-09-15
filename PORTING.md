@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 113 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 119 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -186,15 +186,16 @@ Done:
 - the server's own screens decoded: hangar, map, cover art, disk prompts, and the death picture,
   which the death card now shows, and the hangar, which the menu and the save slot picker sit in
 - the server's menu itself: MainServer's four screens, in the panel, in its own font
+- MAPA, the map between complexes, with the choice of three it gives and the centre's conditions
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the map screen between complexes, where MAPA lets you pick one of seven targets and marks off
-  the ones already taken
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
+- the map's progress is not saved yet: which complexes have fallen lives in `WorldMap` for the
+  session rather than in `STRUCTURE+64`
 
 ## Saves
 
@@ -501,6 +502,51 @@ or   d1,d0
 So a glyph lives at `(index >> 1) * 32 + (index & 1)` with its thirteen rows two bytes apart, the
 odd bytes belonging to its neighbour. The `subq #1` is the part to remember: the font has no '@',
 so everything above it shifts down one and 'A' lands at index 32.
+
+## The map between complexes
+
+MAPA is where the next complex is chosen, and the order is not fixed. `Kolejnosc` lists the seven
+in the order they are meant to fall — 2, 5, 6, 3, 4, 7, 8 — and Printnij walks it skipping the ones
+already taken:
+
+```asm
+moveq #3,d3
+lea   Kolejnosc,a1
+ma_p2: move (a1)+,d2
+      tst.b 64-1(a2,d2.w)      ;already done? then it does not use up the budget
+      bne.s ma_p2
+      cmp   d1,d2
+      beq.s ma_p1              ;this is the one asked about, so it is open
+      subi  #1,d3
+      bne.s ma_p2
+      ;fell through: no access
+```
+
+So the first **three** still standing are open at once, and finishing one lets the next in rather
+than simply moving a pointer along. That is the whole structure of the campaign, and the port had
+been walking ETAPY straight through instead.
+
+`Kon2Tab` says which complex each of the seven targets is — 7, 4, 2, 3, 5, 6, 8 for PRISON,
+HANGAR, POWER PLANT, STORES, LABORATORY, SEWERS and CENTER — and `Kon1Tab` is the way back, giving
+the target the cursor lands on once a complex has fallen. Complex 1 is not on the map at all: it
+is where the game begins.
+
+The centre is the exception. `ma_wybrany` wants `STRUCTURE+98` at seven, so every complex behind
+you, and `sv_Glowica` at -12, so the warhead complete; short of either it prints
+"YOU MUST HAVE THE WHOLE BOMB TO ENTER!" and leaves you on the map.
+
+### Drawing it
+
+The picture is 320 by 192 and the screen is 200, so the eight rows left over are the status line —
+`ma_draw` writes seven of them with `Font8`, which is the in-game 8 by 8 font, one bitplane, forty
+characters. `KomplexTexts` is the template and `ma_CopIt` drops eleven characters into each of its
+two fields.
+
+`ArrowPos` holds the seven cursor positions as offsets into the six plane picture, so
+`[row*40*6] + byte` unpacks each one into a row and a byte column. The arrow itself is
+`strzalka.rawb`: 132 bytes, which is 2 by 11 in six planes, blitted into the picture and therefore
+in its palette. `map_NEWLEV3` bobs it through `Asinus`, a 32 entry table of heights up to 9 — and
+`ClrArrow` restores 20 rows behind it, which is 11 plus that 9.
 
 ## Dying
 

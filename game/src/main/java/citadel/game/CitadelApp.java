@@ -178,6 +178,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         } catch (Exception e) {
             System.out.println("no hangar artwork, the title goes straight into play: " + e);
         }
+        try {
+            mapView = new MapView(assetManager, assets, cam.getWidth(), cam.getHeight());
+        } catch (Exception e) {
+            System.out.println("no map artwork, complexes follow each other in order: " + e);
+        }
         // the interference burst goes over the view but under the furniture: sv_MAKE_SZUM paints
         // the chunky buffer before sv_copy, and COMPASS and UpdateMap run after it
         layer(automap.picture(), Z_FURNITURE);
@@ -192,6 +197,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 || System.getProperty("citadel.at") != null;
         enter(skipFrontEnd ? Mode.PLAYING
                 : "hangar".equals(want) ? Mode.HANGAR
+                : "map".equals(want) ? Mode.MAP
                 : "title".equals(want) ? Mode.TITLE
                 : "dead".equals(want) ? Mode.DEAD
                 : "victory".equals(want) ? Mode.VICTORY
@@ -379,6 +385,19 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             enter(Mode.VICTORY);
             return;
         }
+        // MAPA stands between complexes: the one just taken is marked off and the next is chosen
+        // off the map rather than following in ETAPY's order
+        int finished = Assets.complexOf(currentMap);
+        if (mapView != null && next.complex != finished) {
+            worldMap.markDone(finished);
+            worldMap.setChoice(citadel.core.WorldMap.CURSOR_AFTER[
+                    Math.max(0, Math.min(finished - 1,
+                            citadel.core.WorldMap.CURSOR_AFTER.length - 1))]);
+            mapView.flash("");
+            advancing = false;
+            enter(Mode.MAP);
+            return;
+        }
         File f = campaign.file(assets.mapsDir(), next);
         if (f == null) {
             game.note("missing map " + next.mapName());
@@ -449,7 +468,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
      * What the application is doing. The original is three programs — an intro player, a server
      * with the menus, and the game engine — chained by the loader; here they are states.
      */
-    private enum Mode { INTRO, TITLE, HANGAR, PLAYING, DEAD, VICTORY, SLOTS }
+    private enum Mode { INTRO, TITLE, HANGAR, MAP, PLAYING, DEAD, VICTORY, SLOTS }
 
     /** Which way the slot picker is pointing. */
     private enum SlotAction { SAVE, LOAD }
@@ -535,6 +554,13 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                     hangarView.update(hangarMenu);
                 }
                 break;
+            case MAP:
+                screens.hide();
+                if (mapView != null) {
+                    mapView.attach(guiNode);
+                    mapView.update(worldMap, 0f);
+                }
+                break;
             case DEAD:
                 screens.showDeath(textOr(39, "YOU ARE DEAD")
                         + "\n\nENTER to restart the level    F9 to load");
@@ -548,6 +574,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         if (next != Mode.HANGAR && hangarView != null) {
             hangarView.detach();
+        }
+        if (next != Mode.MAP && mapView != null) {
+            mapView.detach();
         }
         inputManager.setCursorVisible(next != Mode.PLAYING);
         boolean inGame = next == Mode.PLAYING;
@@ -610,6 +639,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
         if (mode == Mode.HANGAR) {
             serveHangarKey(name);
+            return;
+        }
+        if (mode == Mode.MAP) {
+            serveMapKey(name);
             return;
         }
 
@@ -684,6 +717,54 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
         }
         hangarView.update(hangarMenu);
+    }
+
+    /** MAPA: the map between complexes, and which of them have fallen. */
+    private final citadel.core.WorldMap worldMap = new citadel.core.WorldMap();
+    private MapView mapView;
+
+    /**
+     * ma_MainLoop: left and right walk the seven targets, fire picks one. A refused pick prints
+     * its line and leaves you on the map, as ma_uf does after its 110 frame wait.
+     */
+    private void serveMapKey(String name) {
+        if ("left".equals(name) || "turnL".equals(name)) {
+            worldMap.move(-1);
+            mapView.flash("");
+        } else if ("right".equals(name) || "turnR".equals(name)) {
+            worldMap.move(1);
+            mapView.flash("");
+        } else if ("confirm".equals(name)) {
+            switch (worldMap.pick(game.inventory.warhead)) {
+                case ALREADY_EXPLORED:
+                    mapView.flash(citadel.core.WorldMap.EXPLORED_TEXT);
+                    break;
+                case INACCESSIBLE:
+                    mapView.flash(citadel.core.WorldMap.NO_ACCESS_TEXT);
+                    break;
+                case NEED_THE_BOMB:
+                    mapView.flash(citadel.core.WorldMap.NEED_BOMB_TEXT);
+                    break;
+                default:
+                    startComplex(worldMap.chosenComplex());
+                    return;
+            }
+        }
+        mapView.update(worldMap, 0f);
+    }
+
+    /** Starts a complex at its first sub-level, carrying the inventory across. */
+    private void startComplex(int complex) {
+        String map = String.format("LEVEL%02dA.MAP", complex);
+        citadel.core.Inventory carried = game.inventory;
+        if (!loadLevel(map)) {
+            mapView.flash("MISSING MAP " + map);
+            mapView.update(worldMap, 0f);
+            return;
+        }
+        copyInventory(carried, game.inventory);
+        game.note("ENTERING " + currentMap);
+        enter(Mode.PLAYING);
     }
 
     /** The five training maps from FileStructure2: M1T, M3T, M3K, M5T, M6T. */

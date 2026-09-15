@@ -36,7 +36,7 @@ public final class Fade {
         picture.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
         picture.setWidth(width);
         picture.setHeight(height);
-        picture.setLocalTranslation(0f, 0f, CitadelApp.Z_TEXT + 1f);
+        picture.setLocalTranslation(0f, 0f, CitadelApp.Z_TEXT + 2f);
     }
 
     public Picture picture() {

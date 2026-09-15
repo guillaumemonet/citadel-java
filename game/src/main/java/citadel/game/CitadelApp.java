@@ -53,6 +53,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private Compass compass;
     private HeartMonitor heartMonitor;
     private BombGauge bombGauge;
+    /** The original status panel, drawn over the bottom of the view. */
+    private HudPanel hudPanelView;
     /** sv_Death, the blood that runs down the view before the death card. */
     private BloodWipe bloodWipe;
     /** p_FadeColors, which takes the screen to black after it. */
@@ -145,8 +147,6 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         compass = new Compass(assetManager, cam.getWidth(), cam.getHeight(),
                 automap.side());
         guiNode.attachChild(compass.picture());
-        // the burst goes over the view but under the furniture: sv_MAKE_SZUM paints the chunky
-        // buffer before sv_copy, and COMPASS and UpdateMap run after it
         try {
             weaponDisplay = new WeaponDisplay(assetManager, assets,
                     citadel.core.WeaponChange.loadFrom(assets.dataRoot()));
@@ -157,10 +157,25 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         fade = new Fade(assetManager, cam.getWidth(), cam.getHeight());
         heartMonitor = new HeartMonitor(assetManager);
         guiNode.attachChild(heartMonitor.picture());
-        bombGauge = new BombGauge(assetManager, assets, 12f, 12f + citadel.core.Heart.HEIGHT * 4 + 8f);
+        bombGauge = new BombGauge(assetManager, assets, 0f, 0f);
+        try {
+            hudPanelView = new HudPanel(assetManager, assets, complex, cam.getWidth());
+            guiNode.attachChild(hudPanelView.strip());
+            guiNode.attachChild(hudPanelView.overlay());
+            hudPanelView.place(compass.picture(),
+                    HudPanel.COMPASS_X, HudPanel.COMPASS_ROW, 32, 27);
+            hudPanelView.place(heartMonitor.picture(),
+                    HudPanel.HEART_X, HudPanel.HEART_ROW,
+                    citadel.core.Heart.WIDTH, citadel.core.Heart.HEIGHT);
+            hudPanelView.place(bombGauge.picture(),
+                    HudPanel.BOMB_X, HudPanel.BOMB_ROW,
+                    citadel.core.BombGfx.WIDTH, citadel.core.BombGfx.HEIGHT);
+        } catch (Exception e) {
+            System.out.println("no status panel artwork, keeping the plain readout: " + e);
+        }
+        // the interference burst goes over the view but under the furniture: sv_MAKE_SZUM paints
+        // the chunky buffer before sv_copy, and COMPASS and UpdateMap run after it
         layer(automap.picture(), Z_FURNITURE);
-        layer(compass.picture(), Z_FURNITURE);
-        layer(heartMonitor.picture(), Z_FURNITURE);
         syncCamera();
 
         screens = new Screens(assetManager, guiNode,
@@ -504,6 +519,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (hudPanel != null) {
             hudPanel.setCullHint(hint);
         }
+        if (hudPanelView != null) {
+            hudPanelView.strip().setCullHint(hint);
+            hudPanelView.overlay().setCullHint(hint);
+        }
         if (weaponDisplay != null && weaponDisplay.picture() != null) {
             weaponDisplay.picture().setCullHint(hint);
         }
@@ -748,9 +767,12 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         bombGauge.update(guiNode, game, Assets.complexOf(currentMap));
         interference.update(guiNode, game.szumActive(), game.szumFrame());
         if (weaponDisplay != null) {
-            weaponDisplay.sync(guiNode, game, Assets.complexOf(currentMap),
-                    cam.getWidth(), cam.getHeight());
+            weaponDisplay.sync(guiNode, game, Assets.complexOf(currentMap));
             weaponDisplay.update(tpf);
+            if (hudPanelView != null && weaponDisplay.picture() != null) {
+                hudPanelView.place(weaponDisplay.picture(),
+                        HudPanel.WEAPON_X, HudPanel.WEAPON_ROW, 32, 27);
+            }
         }
         sound.serve(game);
         serveTeleport(tpf);
@@ -858,8 +880,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
      */
     static final float Z_DISSOLVE = 1f;
     static final float Z_INTERFERENCE = 2f;
-    static final float Z_FURNITURE = 3f;
-    static final float Z_TEXT = 4f;
+    /** The status panel artwork, which the widgets sit in. */
+    static final float Z_PANEL = 3f;
+    static final float Z_FURNITURE = 4f;
+    static final float Z_TEXT = 5f;
 
     private static void layer(com.jme3.scene.Spatial s, float z) {
         com.jme3.math.Vector3f t = s.getLocalTranslation();
@@ -873,7 +897,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private WeaponDisplay weaponDisplay;
 
     private void setupHud() {
-        float bandHeight = 56f;
+        float bandHeight = 30f;
         com.jme3.texture.Image px = new com.jme3.texture.Image(
                 com.jme3.texture.Image.Format.RGBA8, 1, 1,
                 com.jme3.util.BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xb0}),
@@ -910,25 +934,19 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
         }
         citadel.core.Inventory inv = game.inventory;
-        StringBuilder cards = new StringBuilder();
-        for (int c = 0; c < 3; c++) {
-            if (inv.hasCard(c)) {
-                cards.append("RGB".charAt(c));
-            }
+        if (hudPanelView != null) {
+            hudPanelView.update(game, message.toUpperCase());
         }
-        hud.setText(String.format(
-                "energy %d%s   %s %d   %s%s   %d:%02d   cell (%d,%d) facing %s%n%s%s",
-                inv.energyReading(),
-                game.isEnergyCritical() ? " !" : "",
-                citadel.core.Inventory.WEAPON_NAMES[inv.current], inv.ammoReading(),
-                cards.length() > 0 ? "cards " + cards : "",
+        // the panel carries energy, ammunition, the cards and the message now, so this line is
+        // only the things the original never showed: the clock, where you are, and what is in hand
+        hud.setText(String.format("%s%s   %d:%02d   cell (%d,%d) facing %s%s",
+                citadel.core.Inventory.WEAPON_NAMES[inv.current],
                 inv.speedBoost > 0 ? "  [fast]" : "",
                 game.levelSeconds() / 60, game.levelSeconds() % 60,
                 game.cellX(), game.cellY(),
                 citadel.core.MapFile.DIR_NAMES[game.facingDir()],
-                game.isPlayerDead() ? "[YOU ARE DEAD]  "
-                        : game.isLevelComplete() ? "[EXIT REACHED]  " : "",
-                message));
+                game.isPlayerDead() ? "   [YOU ARE DEAD]"
+                        : game.isLevelComplete() ? "   [EXIT REACHED]" : ""));
     }
 
     private static File findMap(File dir, String want) {

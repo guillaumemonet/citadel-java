@@ -57,8 +57,7 @@ public final class WeaponDisplay {
      * Picks up a change of weapon and starts the reveal. Call every frame; it is a no-op while
      * the weapon in hand has not changed.
      */
-    public void sync(com.jme3.scene.Node guiNode, citadel.core.GameState game, int complex,
-                     int screenWidth, int screenHeight) {
+    public void sync(com.jme3.scene.Node guiNode, citadel.core.GameState game, int complex) {
         int slot = game.inventory.current;
         if (slot == shown) {
             return;
@@ -77,12 +76,9 @@ public final class WeaponDisplay {
         if (picture == null) {
             picture = new Picture("weapon");
         }
-        float side = screenHeight * 0.46f;
         picture.setTexture(assetManager, texture, true);
         picture.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
-        picture.setWidth(side);
-        picture.setHeight(side);
-        picture.setLocalTranslation((screenWidth - side) / 2f, 0f, CitadelApp.Z_FURNITURE);
+        // sv_Weapon is a 32 by 27 slot in the status panel; HudPanel places it
         if (picture.getParent() == null) {
             guiNode.attachChild(picture);
         }

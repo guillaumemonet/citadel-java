@@ -40,7 +40,7 @@ public final class BloodWipe {
         picture.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
         picture.setWidth(width);
         picture.setHeight(height);
-        picture.setLocalTranslation(0f, 0f, CitadelApp.Z_TEXT + 0.5f);
+        picture.setLocalTranslation(0f, 0f, CitadelApp.Z_TEXT + 1f);
     }
 
     public Picture picture() {

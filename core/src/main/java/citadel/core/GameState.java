@@ -14,13 +14,13 @@ import java.util.List;
  */
 public final class GameState {
 
+    /** DrawBomb: {@code addi #77,d0}, the first of the six warhead section messages. */
+    public static final int BOMB_TEXT = 77;
+
     /**
      * min_distance, from the equate {@code [500 * 2^SHLeft / mc_maxHeigth] + 2} evaluated with
      * 68000 integer division: 500 * 256 / 350 = 365, + 2.
      */
-    /** DrawBomb: {@code addi #77,d0}, the first of the six warhead section messages. */
-    public static final int BOMB_TEXT = 77;
-
     public static final int MIN_DISTANCE = 367;
     /** How close the player's centre may get to a wall, i.e. min_distance - 60 in sv_Border. */
     public static final int PLAYER_RADIUS = MIN_DISTANCE - 60;
@@ -226,6 +226,21 @@ public final class GameState {
             default:
                 break;
         }
+    }
+
+    /**
+     * sv_difficult, which the server's options screen toggles. The engine reads it in exactly one
+     * place: br_BumpWall skips the point of energy when it is set, so easy means walking into
+     * walls is free.
+     */
+    private boolean easy;
+
+    public void setEasy(boolean on) {
+        easy = on;
+    }
+
+    public boolean isEasy() {
+        return easy;
     }
 
     public boolean isImmortal() {
@@ -605,7 +620,10 @@ public final class GameState {
         if (rel >= BUMP_WINDOW) {
             return;
         }
-        inventory.hurt(1);
+        // tst sv_difficult / bne .NieOd: no energy lost on the easy setting
+        if (!easy) {
+            inventory.hurt(1);
+        }
         log.add(text(TextTable.BUMP_WALL, "ouch"));
         szum();
         heart.excite();

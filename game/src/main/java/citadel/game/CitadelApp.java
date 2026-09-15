@@ -173,6 +173,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         } catch (Exception e) {
             System.out.println("no status panel artwork, keeping the plain readout: " + e);
         }
+        try {
+            hangarView = new HangarView(assetManager, assets, cam.getWidth(), cam.getHeight());
+        } catch (Exception e) {
+            System.out.println("no hangar artwork, the title goes straight into play: " + e);
+        }
         // the interference burst goes over the view but under the furniture: sv_MAKE_SZUM paints
         // the chunky buffer before sv_copy, and COMPASS and UpdateMap run after it
         layer(automap.picture(), Z_FURNITURE);
@@ -186,6 +191,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         boolean skipFrontEnd = (System.getProperty("citadel.screenshot") != null && want == null)
                 || System.getProperty("citadel.at") != null;
         enter(skipFrontEnd ? Mode.PLAYING
+                : "hangar".equals(want) ? Mode.HANGAR
                 : "title".equals(want) ? Mode.TITLE
                 : "dead".equals(want) ? Mode.DEAD
                 : "victory".equals(want) ? Mode.VICTORY
@@ -401,6 +407,31 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
     }
 
+    /** Loads a named map and starts it fresh, which is what a training level wants. */
+    private boolean loadLevel(String mapName) {
+        File f = new File(assets.mapsDir(), mapName);
+        if (!f.isFile()) {
+            return false;
+        }
+        try {
+            level = Level.load(f);
+            currentMap = f.getName();
+            game = new GameState(level);
+            game.setTexts(texts);
+            game.setLoopHz(pace);
+            game.setEasy(hangarMenu.easy());
+            rootNode.detachAllChildren();
+            geometry = new LevelGeometry(level, assets, Assets.complexOf(currentMap));
+            rootNode.attachChild(geometry.build());
+            syncCamera();
+            System.out.println("loaded " + level);
+            return true;
+        } catch (Exception e) {
+            System.out.println("cannot load " + mapName + ": " + e);
+            return false;
+        }
+    }
+
     /** Weapons, ammunition, cards and energy survive a level change; level state does not. */
     private static void copyInventory(citadel.core.Inventory from, citadel.core.Inventory to) {
         System.arraycopy(from.owned, 0, to.owned, 0, from.owned.length);
@@ -418,7 +449,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
      * What the application is doing. The original is three programs — an intro player, a server
      * with the menus, and the game engine — chained by the loader; here they are states.
      */
-    private enum Mode { INTRO, TITLE, PLAYING, DEAD, VICTORY, SLOTS }
+    private enum Mode { INTRO, TITLE, HANGAR, PLAYING, DEAD, VICTORY, SLOTS }
 
     /** Which way the slot picker is pointing. */
     private enum SlotAction { SAVE, LOAD }
@@ -495,7 +526,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 screens.startIntro();
                 break;
             case TITLE:
-                screens.showTitle("ENTER to begin    F9 to load a saved game    ESC to quit");
+                screens.showTitle("ENTER for the hangar    ESC to quit");
+                break;
+            case HANGAR:
+                screens.hide();
+                if (hangarView != null) {
+                    hangarView.attach(guiNode);
+                    hangarView.update(hangarMenu);
+                }
                 break;
             case DEAD:
                 screens.showDeath(textOr(39, "YOU ARE DEAD")
@@ -507,6 +545,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             default:
                 screens.hide();
                 break;
+        }
+        if (next != Mode.HANGAR && hangarView != null) {
+            hangarView.detach();
         }
         inputManager.setCursorVisible(next != Mode.PLAYING);
         boolean inGame = next == Mode.PLAYING;
@@ -567,10 +608,18 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             return;
         }
 
+        if (mode == Mode.HANGAR) {
+            serveHangarKey(name);
+            return;
+        }
+
         if ("confirm".equals(name)) {
             switch (mode) {
                 case INTRO:
                     enter(Mode.TITLE);      // let the player skip the animation
+                    break;
+                case TITLE:
+                    enter(hangarView != null ? Mode.HANGAR : Mode.PLAYING);
                     break;
                 case DEAD:
                     restartLevel();
@@ -585,6 +634,68 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         } else if ("load".equals(name)) {
             openSlots(SlotAction.LOAD, mode);
         }
+    }
+
+    /** The server's menu, and the screen it is drawn on. */
+    private final citadel.core.HangarMenu hangarMenu = new citadel.core.HangarMenu();
+    private HangarView hangarView;
+
+    /**
+     * MainServer's loop: the cursor walks the six lines and the fire button picks one. The
+     * original reads the joystick, so up and down are the same keys that walk in game.
+     */
+    private void serveHangarKey(String name) {
+        if ("fwd".equals(name)) {
+            hangarMenu.move(-1);
+        } else if ("back".equals(name)) {
+            hangarMenu.move(1);
+        } else if ("use".equals(name)) {
+            hangarMenu.open(citadel.core.HangarMenu.Screen.MAIN);
+        } else if ("confirm".equals(name)) {
+            switch (hangarMenu.select()) {
+                case START:
+                    enter(Mode.PLAYING);
+                    return;
+                case LOAD:
+                    openSlots(SlotAction.LOAD, Mode.HANGAR);
+                    return;
+                case OPTIONS:
+                    hangarMenu.open(citadel.core.HangarMenu.Screen.OPTIONS);
+                    break;
+                case TRAINING:
+                    hangarMenu.open(citadel.core.HangarMenu.Screen.TRAINING);
+                    break;
+                case TRAIN_LEVEL:
+                    startTraining(hangarMenu.line());
+                    return;
+                case BACK:
+                    hangarMenu.open(citadel.core.HangarMenu.Screen.MAIN);
+                    break;
+                case DIFFICULTY:
+                    game.setEasy(hangarMenu.easy());
+                    break;
+                case INFO:
+                    screens.showMessage("CITADEL\n\nVirtual Design, 1995\n"
+                            + "Java and jMonkeyEngine port by Guillaume Monet\n\n"
+                            + "ENTER to go back");
+                    return;
+                default:
+                    break;
+            }
+        }
+        hangarView.update(hangarMenu);
+    }
+
+    /** The five training maps from FileStructure2: M1T, M3T, M3K, M5T, M6T. */
+    private void startTraining(int index) {
+        String map = citadel.core.HangarMenu.TRAINING_MAPS[
+                Math.max(0, Math.min(index, citadel.core.HangarMenu.TRAINING_MAPS.length - 1))];
+        if (!loadLevel(map)) {
+            game.note("no such training level: " + map);
+            hangarView.update(hangarMenu);
+            return;
+        }
+        enter(Mode.PLAYING);
     }
 
     /**

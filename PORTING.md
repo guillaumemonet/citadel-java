@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 107 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 113 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -184,15 +184,16 @@ Done:
 - `sv_Death`, the blood that runs down the screen, and `p_FadeColors` after it
 - the original status panel, with every widget where the engine puts it, and `sc_DoScroll`
 - the server's own screens decoded: hangar, map, cover art, disk prompts, and the death picture,
-  which the death card now shows, and the hangar, which the save slot picker sits in
+  which the death card now shows, and the hangar, which the menu and the save slot picker sit in
+- the server's menu itself: MainServer's four screens, in the panel, in its own font
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the server's flow proper: its menu tree in the hangar, and the map screen between complexes,
-  where MAPA lets you pick one of seven targets and marks off the ones already taken
+- the map screen between complexes, where MAPA lets you pick one of seven targets and marks off
+  the ones already taken
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 
 ## Saves
@@ -448,6 +449,40 @@ back — so the hit lands and is then undone. The port does the same.
 
 Every key goes into the ring, movement included, which is why the codes sharing letters with WASD
 cost nothing.
+
+## The server's menu
+
+MainServer keeps its menus as six lines of sixteen characters with a flag byte in front of each,
+and the port takes them verbatim:
+
+
+
+DrukTekst puts the block at , eight rows into the panel, and steps  a
+line — so the lines are at rows 61, 76, 91 and so on, sixteen characters from x 96. PostawKropa
+marks the chosen one with an eight pixel circle at  stepped by
+, which puts a dot either side of the line at x 88 and x 224. The flag byte picks
+between two glyph routines, the second of which rolls each byte four bits and writes two, drawing
+the line at double width.
+
+All five training entries turn out to ship.  names a map for each — M1T, M3T,
+M3K, M5T, M6T — and  is there beside the other four, so STORES 2 works too. The
+complex numbers double as the naming: 1 is the dungeons, 3 the stores, 5 the laboratory and 6 the
+sewers.
+
+The options screen is the one place the port does not follow. The original's four are the
+renderer's — screen size, detail level, floors on or off — and none of them mean anything here,
+so only  is kept, the one the engine itself reads:  skips the point of
+energy when it is set, so easy means walking into walls is free.
+
+### KANE.fnt
+
+The menu font, 3072 bytes, and the index arithmetic in DrukTekst gives its shape away:
+
+
+
+So a glyph lives at  with its thirteen rows two bytes apart, the
+odd bytes belonging to its neighbour. The  is the part to remember: the font has no '@',
+so everything above it shifts down one and 'A' lands at index 32.
 
 ## Dying
 

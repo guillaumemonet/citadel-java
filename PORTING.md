@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 97 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 101 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -183,13 +183,15 @@ Done:
 - `CheckCodes`, all seven cheats
 - `sv_Death`, the blood that runs down the screen, and `p_FadeColors` after it
 - the original status panel, with every widget where the engine puts it, and `sc_DoScroll`
+- the server's own screens decoded: hangar, map, cover art, disk prompts, and the death picture,
+  which the death card now shows
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the briefing screens (`SERVER`)
+- the server's flow around those screens: picking a level in the hangar, the map between complexes
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 
 ## Saves

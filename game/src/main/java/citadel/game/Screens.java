@@ -128,6 +128,14 @@ public final class Screens {
     }
 
     /**
+     * The death card. Store/zabity.rawb is the picture the server shows when you are killed, and
+     * the converter now decodes it; the prompt goes under it.
+     */
+    public void showDeath(String prompt) {
+        show(firstExisting("screens/zabity.png"), prompt);
+    }
+
+    /**
      * A list with one entry marked, used for the five save slots. Drawn in a monospaced-ish block
      * over black, which is as close as this gets to the server's own slot picker.
      */

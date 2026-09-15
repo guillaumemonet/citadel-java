@@ -23,6 +23,7 @@ Output:
 | `maps/` | one PNG overview and one text dump per level, plus `INDEX.txt` |
 | `sounds/` | the 25 effects as WAV, at their original Paula rates |
 | `intro/` | the three intro animations as PNG frames, plus 46 loose IFF artwork images |
+| `screens/` | the headerless `.raw`/`.rawb` screens: hangar, map, cover art, death picture, disk prompts |
 | `raw/` | tile atlases, for eyeballing the decode |
 
 Everything below was derived from the assembly sources in this repository and verified against
@@ -304,6 +305,32 @@ change the framing, so it really is in the data: the `BODY` is consumed exactly,
 animate correctly, and the same reader now decodes the title screens full-frame and pixel-correct.
 Most likely a window the intro player composites, with `Napisy.a`/`Napisy.g` (subtitles) filling
 the rest. Worth confirming against `IntroReplayer_125.ss` before building on it.
+
+## Headerless screens: `Data/INTRO/**/*.raw`, `*.rawb`
+
+These carry no header at all, and what stands in for one is arithmetic. The shape is interleaved
+bitplanes exactly as `WINDOW1.RAW` has them, followed by the palette as big endian 0RGB words —
+at the **end** of the file, which is the part that is easy to miss. Two colours to a plane, so the
+palette length gives the plane count, and the height then has to come out a whole number of rows.
+
+| file | size | shape |
+|---|---|---|
+| `GFX/MT.raw` | 32 032 | 320x200, 4 planes, 16 colours |
+| `GFX/Panel_Hires.rawb` | 64 032 | 640x200, 4 planes, 16 colours |
+| `GFX/hangar.rawb`, `Hangar_ENG.rawb` | 48 128 | 320x200, 6 planes, 64 colours |
+| `GFX/MAPKA.rawb` | 46 208 | 320x192, 6 planes |
+| `GFX/cytadela.rawb` | 60 608 | 320x252, 6 planes, **Hold-and-Modify** |
+| `GFX/dysk.rawb`, `dysk.ENG.rawb` | 9 904 | 320x41, 6 planes, 32 colours |
+| `STORE/zabity.rawb` | 40 064 | 320x200, 5 planes, 32 colours |
+| `STORE/zabpanel.raw`, `_ENG` | 6 432 | 320x40, 4 planes, 16 colours |
+
+The arithmetic narrows a shape down but does not pin it: `hangar.rawb` divides as 320x240 in five
+planes just as neatly as 320x200 in six, and only one of those is a picture. `cytadela.rawb` is
+the cover art and needs the same Hold-and-Modify decode as the intro animations; read as plain
+indices it comes out speckled red and green.
+
+`Winieta_EngCover.rawb` and `GameOver.rawb` carry no palette that reads as 0RGB, so they are left
+alone.
 
 ## Not converted yet
 

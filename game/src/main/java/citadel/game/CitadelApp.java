@@ -493,7 +493,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 screens.showTitle("ENTER to begin    F9 to load a saved game    ESC to quit");
                 break;
             case DEAD:
-                screens.showMessage(textOr(39, "YOU ARE DEAD")
+                screens.showDeath(textOr(39, "YOU ARE DEAD")
                         + "\n\nENTER to restart the level    F9 to load");
                 break;
             case VICTORY:

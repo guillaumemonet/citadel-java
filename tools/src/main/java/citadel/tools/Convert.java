@@ -6,6 +6,7 @@ import citadel.core.HudGfx;
 import citadel.core.Io;
 import citadel.core.MapFile;
 import citadel.core.Palette;
+import citadel.core.RawScreen;
 import citadel.core.SoundTable;
 import citadel.core.VirReader;
 
@@ -65,6 +66,7 @@ public final class Convert {
         }
         if (!any || flags.contains("--intro")) {
             c.convertIntro(c.dataRoot);
+            c.convertScreens(c.dataRoot, c.out);
         }
         if (flags.contains("--raw")) {
             c.dumpRawTiles();
@@ -363,6 +365,66 @@ public final class Convert {
      * Worth saying plainly: the repository README states the intro animations are gone. They are
      * not. Data/INTRO/ANIM2 holds three ordinary IFF ANIMs, and they decode.
      */
+    /**
+     * The headerless screens under Data/INTRO, which nothing had read: the hangar and the map the
+     * server shows between levels, the cover art, the death picture and the disk prompts. See
+     * {@link RawScreen} for the shape; the table below is the only thing that is not in the files,
+     * since they carry no header to say how wide they are.
+     */
+    private void convertScreens(File dataRoot, File out) throws IOException {
+        File dst = new File(out, "screens");
+        Io.mkdirs(dst);
+        StringBuilder log = new StringBuilder();
+        log.append("# headerless screens from Data/INTRO\n");
+        log.append("file                      size       planes  note\n");
+        int written = 0;
+        for (String[] s : SCREENS) {
+            File src = new File(dataRoot, s[0]);
+            if (!src.isFile()) {
+                continue;
+            }
+            int width = Integer.parseInt(s[1]);
+            int planes = Integer.parseInt(s[2]);
+            int paletteBytes = Integer.parseInt(s[3]);
+            boolean ham = "ham".equals(s[4]);
+            try {
+                RawScreen screen = RawScreen.load(src, width, planes, paletteBytes);
+                int[] px = ham ? screen.hamPixels() : screen.pixels();
+                BufferedImage img = new BufferedImage(screen.width, screen.height,
+                        BufferedImage.TYPE_INT_ARGB);
+                for (int y = 0; y < screen.height; y++) {
+                    for (int x = 0; x < screen.width; x++) {
+                        img.setRGB(x, y, px[y * screen.width + x]);
+                    }
+                }
+                String name = src.getName().replaceAll("\\.[^.]+$", "").toLowerCase() + ".png";
+                ImageIO.write(img, "png", new File(dst, name));
+                written++;
+                log.append(String.format("%-24s %4dx%-4d  %d       %s%n",
+                        name, screen.width, screen.height, planes, s[5]));
+            } catch (IOException e) {
+                System.out.println("screens: " + src.getName() + " skipped, " + e.getMessage());
+            }
+        }
+        Io.writeText(new File(dst, "INDEX.txt"), log.toString());
+        System.out.printf("screens: %d written%n", written);
+    }
+
+    /** path, width, planes, trailing palette bytes, "ham" or "-", note. */
+    private static final String[][] SCREENS = {
+        {"INTRO/GFX/MT.raw", "320", "4", "32", "-", "main title"},
+        {"INTRO/GFX/Panel_Hires.rawb", "640", "4", "32", "-", "hires panel"},
+        {"INTRO/GFX/hangar.rawb", "320", "6", "128", "-", "hangar, Polish"},
+        {"INTRO/GFX/Hangar_ENG.rawb", "320", "6", "128", "-", "hangar, English"},
+        {"INTRO/GFX/MAPKA.rawb", "320", "6", "128", "-", "the complex map"},
+        {"INTRO/GFX/cytadela.rawb", "320", "6", "128", "ham", "cover art, Hold-and-Modify"},
+        {"INTRO/GFX/dysk.rawb", "320", "6", "64", "-", "disk prompt, Polish"},
+        {"INTRO/GFX/dysk.ENG.rawb", "320", "6", "64", "-", "disk prompt, English"},
+        {"INTRO/STORE/zabity.rawb", "320", "5", "64", "-", "the death picture"},
+        {"INTRO/STORE/zabpanel.raw", "320", "4", "32", "-", "death panel, Polish"},
+        {"INTRO/STORE/zabpanel_ENG.raw", "320", "4", "32", "-", "death panel, English"},
+    };
+
     private void convertIntro(File dataRoot) throws IOException {
         File animDir = new File(dataRoot, "INTRO/ANIM2");
         File outDir = new File(out, "intro");

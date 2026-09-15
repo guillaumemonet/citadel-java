@@ -25,6 +25,9 @@ import com.jme3.util.BufferUtils;
  */
 public final class Screens {
 
+    /** Point size of the caption text when it is not being squeezed into the hangar panel. */
+    private static final float CAPTION_SIZE = 22f;
+
     /** Frames of the intro shown per second, roughly the rate the Amiga player ran them at. */
     private static final float INTRO_FPS = 12f;
 
@@ -55,7 +58,7 @@ public final class Screens {
         picture.setPosition(0, 0);
 
         caption = new BitmapText(font);
-        caption.setSize(22f);
+        caption.setSize(CAPTION_SIZE);
         caption.setColor(ColorRGBA.White);
     }
 
@@ -136,16 +139,50 @@ public final class Screens {
     }
 
     /**
-     * A list with one entry marked, used for the five save slots. Drawn in a monospaced-ish block
-     * over black, which is as close as this gets to the server's own slot picker.
+     * The hangar is where the server keeps its menus, and the picture has a text panel built into
+     * it. MainServer copies from {@code SERoff}, which is {@code iff_screen+[53*40*6]+12}, and
+     * walks 612 plane rows of 16 bytes; interleaved six planes deep that is x 96 to 223 and rows
+     * 53 to 154. So the slot picker goes in there rather than on a black plate.
      */
+    private static final int PANEL_X = 96;
+    private static final int PANEL_ROW = 53;
+    private static final int PANEL_W = 16 * 8;
+    private static final int PANEL_H = 612 / 6;
+
+    /** True while the caption belongs in the hangar's panel rather than centred on the screen. */
+    private boolean inPanel;
+
+    /** A list with one entry marked, used for the five save slots. */
     public void showList(String heading, List<String> entries, int selected, String prompt) {
         StringBuilder sb = new StringBuilder(heading).append("\n\n");
         for (int i = 0; i < entries.size(); i++) {
-            sb.append(i == selected ? " > " : "   ").append(entries.get(i)).append('\n');
+            sb.append(i == selected ? "> " : "  ").append(entries.get(i)).append('\n');
         }
         sb.append('\n').append(prompt);
-        show(null, sb.toString());
+        inPanel = true;
+        show(firstExisting("screens/hangar_eng.png", "screens/hangar.png"), sb.toString());
+        inPanel = false;
+    }
+
+    /** Fits a block into the hangar's own panel, since that is the box the artwork leaves. */
+    private void placeInHangarPanel(String text) {
+        float sx = width / 320f;
+        float sy = height / 200f;
+        float boxW = PANEL_W * sx;
+        float boxH = PANEL_H * sy;
+        int lines = Math.max(1, text.split("\n", -1).length);
+
+        float size = Math.min(CAPTION_SIZE, boxH / (lines + 1));
+        caption.setSize(size);
+        caption.setText(text);
+        while (caption.getLineWidth() > boxW && size > 7f) {
+            size -= 1f;
+            caption.setSize(size);
+            caption.setText(text);
+        }
+        float used = caption.getLineHeight() * caption.getLineCount();
+        float top = (200 - PANEL_ROW) * sy - Math.max(0f, (boxH - used) / 2f);
+        caption.setLocalTranslation(PANEL_X * sx + 4f, top, 1f);
     }
 
     public void hide() {
@@ -217,13 +254,18 @@ public final class Screens {
             caption.removeFromParent();
             return;
         }
-        caption.setText(text);
-        // A single line sits low, over artwork; a block is centred, since it is the screen itself.
-        float block = caption.getLineHeight() * caption.getLineCount();
-        float y = (caption.getLineCount() > 1)
-                ? (height + block) / 2f
-                : block + height * 0.06f;
-        caption.setLocalTranslation((width - caption.getLineWidth()) / 2f, y, 1f);
+        if (inPanel) {
+            placeInHangarPanel(text);
+        } else {
+            caption.setSize(CAPTION_SIZE);
+            caption.setText(text);
+            // A single line sits low over artwork; a block is centred, being the screen itself.
+            float block = caption.getLineHeight() * caption.getLineCount();
+            float y = (caption.getLineCount() > 1)
+                    ? (height + block) / 2f
+                    : block + height * 0.06f;
+            caption.setLocalTranslation((width - caption.getLineWidth()) / 2f, y, 1f);
+        }
         if (caption.getParent() == null) {
             gui.attachChild(caption);
         }

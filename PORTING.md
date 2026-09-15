@@ -184,14 +184,15 @@ Done:
 - `sv_Death`, the blood that runs down the screen, and `p_FadeColors` after it
 - the original status panel, with every widget where the engine puts it, and `sc_DoScroll`
 - the server's own screens decoded: hangar, map, cover art, disk prompts, and the death picture,
-  which the death card now shows
+  which the death card now shows, and the hangar, which the save slot picker sits in
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the server's flow around those screens: picking a level in the hangar, the map between complexes
+- the server's flow proper: its menu tree in the hangar, and the map screen between complexes,
+  where MAPA lets you pick one of seven targets and marks off the ones already taken
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 
 ## Saves
@@ -351,6 +352,11 @@ is just as well, since its 1111 would send `divu #100` off the end of the digit 
 
 The port draws the strip across the bottom of a full screen view rather than framing the 192 by
 128 window the panel was built around.
+
+The hangar picture has the same trick played on it. `MainServer` copies from `SERoff`, which is
+`iff_screen+[53*40*6]+12`, and walks 612 plane rows of 16 bytes — six planes deep that is x 96 to
+223 and rows 53 to 154, the panel the artwork leaves for the server's menus. The save slot picker
+goes in there.
 
 ### The message line
 

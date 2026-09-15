@@ -176,6 +176,7 @@ Done:
 - `sv_MAKE_SZUM`, the interference burst when a shot lands or the player walks into a wall
 - `TELEPORT`, the chaos-table dissolve from the view being left to the one arrived in
 - the heart monitor, and the exhaustion behind it that scales the walk speed
+- `ci_DrawWeapon`, the pixel-by-pixel reveal when the weapon in hand changes
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -187,7 +188,6 @@ Not started:
 - `p_FadeColors`
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 - `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
-- `ci_DrawWeapon`'s chaos dissolve when the weapon in hand changes
 
 ## Saves
 
@@ -331,6 +331,22 @@ The port has only the new view, since that is whatever the scene renders, so it 
 instead: the framebuffer is read once on the frame the teleport lands, held on top as a texture,
 and eaten away by the same table. The camera is kept still for that single frame so the read
 catches the view being left rather than the one arrived in.
+
+## Changing weapon
+
+`ci_DrawWeapon` runs every VBLANK but only does anything while `sv_ChaosAddr` is non-zero, and the
+only thing that ever rearms it is `ci_NewWeapon`. **There is no firing animation in the original**
+— the feedback for a shot is the projectile and the sound.
+
+What it does is copy the new weapon into place a pixel at a time: 32 pixels a frame, in the order
+`Store/CHAOSTAB.DAT` gives, which is a permutation of 0..863 — and 864 is 32 by 27, the weapon
+window. `lsr #5` picks the row out of an entry and `andi #31` the column. It starts at the last
+entry (`[32*27*2]-2`) and walks backwards with `subq #2,d0`, so a change takes 27 frames.
+
+It copies rather than clears, so the weapon being put away is eaten by the one being drawn rather
+than vanishing first; the port keeps the previous pixels in the buffer for the same reason. The
+table addresses 27 rows and the converted sprites are square, so the rows are stretched to fit —
+the same accommodation the teleport dissolve makes for the window size.
 
 ## Layers in the gui bucket
 

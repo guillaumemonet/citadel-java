@@ -132,8 +132,11 @@ order, 32 entries per VBLANK frame for 32 frames, reusing each entry at five off
 which comes to 5120 cells of four pixels by two rows: the whole 320 by 128 view exactly once.
 `citadel.core.ChaosTable` reads it and hands out the cells frame by frame.
 
-`CHAOSTAB.DAT` is its sibling, used by `ci_DrawWeapon` for the weapon-change dissolve, and is not
-read yet.
+### `Store/CHAOSTAB.DAT`
+
+Its sibling: 1728 bytes, 864 words, a permutation of 0..863 — which is 32 by 27, the weapon
+window. `ci_DrawWeapon` walks it backwards from the last entry, 32 pixels per VBLANK frame, to
+copy a newly selected weapon into place over 27 frames. `citadel.core.WeaponChange` reads it.
 
 ## Levels: `LEVELnnX.MAP`
 
@@ -265,8 +268,7 @@ the rest. Worth confirming against `IntroReplayer_125.ss` before building on it.
 - `Store/ROTTABLE.DAT`, 64 pre-sorted cell visibility lists, one per view angle. The software
   renderer walks these back to front; a jMonkeyEngine port does its own culling and will not need
   them.
-- `Store/IWT.DAT`, `TABLES.DAT`, `CHAOSTAB.DAT`, `SINTABLE.DAT`: engine lookup tables and
-  screen furniture.
+- `Store/IWT.DAT`, `TABLES.DAT`, `SINTABLE.DAT`: engine lookup tables and screen furniture.
 - `Store/TEXT.POL` / `TEXT.ENG` / `TEXT.GER`: in-game strings, indexed by `sv_TextOffsets`.
 - The IFF artwork under `Data/GAME/Gfx_IFF` and `Data/INTRO`. `citadel.tools.IffReader` decodes
   ILBM already and can be run standalone on any of those files.

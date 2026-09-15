@@ -144,10 +144,10 @@ public final class GfxLayout {
         out.add(new Entry("blood", 0, 35 * TILE, 64, 64, "blood decal"));
         out.add(new Entry("blood", 1, 36 * TILE, 64, 64, "blood decal"));
         out.add(new Entry("blood", 2, 37 * TILE, 64, 64, "blood decal"));
-        out.add(new Entry("blood", 3, 38 * TILE, 32, 32, "wall plaque / card slot"));
-        out.add(new Entry("blood", 4, 38 * TILE + 32, 32, 32, "wall plaque / card slot"));
-        out.add(new Entry("blood", 5, 38 * TILE + HALF, 32, 32, "wall plaque / card slot"));
-        out.add(new Entry("blood", 6, 38 * TILE + HALF + 32, 32, 32, "wall plaque / card slot"));
+        out.add(new Entry("blood", 3, 38 * TILE, 32, 32, "card reader, red lamp"));
+        out.add(new Entry("blood", 4, 38 * TILE + 32, 32, 32, "card reader, green lamp"));
+        out.add(new Entry("blood", 5, 38 * TILE + HALF, 32, 32, "KEEP OUT sign"));
+        out.add(new Entry("blood", 6, 38 * TILE + HALF + 32, 32, 32, "KEEP OUT sign, second frame"));
         return out;
     }
 
@@ -215,7 +215,19 @@ public final class GfxLayout {
      */
     public static final int ANIMATED_WALL_SPRITE = 23;
 
-    /** sv_BloodOffsets[5] alternates between the two halves that are blood sprites 5 and 6. */
+    /**
+     * Wall plaques live in sv_BloodOffsets past the three blood decals: dr_AddTables does
+     * {@code addq #2,d5} before scaling, so the 2-bit plaque value n picks entry n + 2. They are
+     * a card reader with a red lamp, the same with a green one, and a KEEP OUT sign.
+     *
+     * Unlike blood, which AB_loop1 overlays across the whole 64x64 texture, AT_loop2 draws 32
+     * columns of 32 bytes at offset 1056 into the tile - {@code 16*65 + 16}, dead centre.
+     */
+    public static int plaqueSpriteFor(int plaqueValue) {
+        return plaqueValue + 2;
+    }
+
+    /** sv_BloodOffsets[5], the KEEP OUT sign, alternates with entry 6. */
     public static final int ANIMATED_PLAQUE_SPRITE = 5;
 
     /**

@@ -100,17 +100,24 @@ not been worked out from the table, so the renderer pairs them by eye.
 
 ### Decals: `sv_BloodOffsets`
 
-`dr_AddBlood` and `dr_AddTables` overlay a decal onto a wall by copying the full 4160-byte tile
-into the scratch buffer at `sv_WallOffsets[27]`, writing every non-zero byte of the decal over it
-as it goes (`AB_loop1`, 260 iterations of four longwords). Blood is settled: the stain value in
-bits 6..7 of the wall byte, less one, picks one of the three 64x64 decals in tiles 35..37.
+Seven entries: three 64x64 blood decals in tiles 35..37, then four 32x32 plaques packed as the
+quadrants of tile 38 — a card reader with a red lamp, the same with a green one, and a KEEP OUT
+sign in two frames.
 
-The four plaque entries are not settled. Their offsets are `38*65*64` plus 0, 32, `65*32` and
-`65*32+32`, and since the copy reads a full tile from wherever it starts, those are sliding
-windows over tile 38 rather than quadrants of it. Tile 38 has a vertical period of 32 and holds
-two different images side by side, so the windows at +0 and +32 read alike, as do the two at
-`65*32`. That would make the `sv_AnimOffsets` entry for `sv_BloodOffsets[5]` a no-op, which it
-plainly is not meant to be. Until that is resolved the renderer draws no plaques at all.
+The two routines that draw them look alike and are not. `dr_AddBlood` copies the wall tile into
+the scratch buffer at `sv_WallOffsets[27]` and overlays every non-zero decal byte on the way past
+(`AB_loop1`, 260 iterations of four longwords, so a full 4160-byte tile). `dr_AddTables` has its
+own pair of loops: `AT_loop1` copies the tile, then `AT_loop2` writes **32 columns of 32 bytes**
+starting at offset 1056, which is `16*65 + 16` — dead centre of the 64x64 face. The two `rept 4`
+passes per column come from the `eori #$8000,d4 / bmi` trick, which runs the block twice.
+
+Selection: blood is bits 6..7 of the wall byte less one, so 1..3 pick entries 0..2. Plaques are
+the 2-bit field in cell byte 4, and `dr_AddTables` does `addq #2,d5` first, so 1..3 pick entries
+3..5. Both preserve the wall's mirror flag, since the composite is drawn as wall id 28 — the
+scratch buffer — with the flag or-ed back in.
+
+Worth knowing when reading a map dump: the editor sets plaque bits freely, and only **81** of the
+754 plaque faces in the shipped campaign have a wall to be drawn on.
 
 ### Animation: `sv_AnimOffsets`
 

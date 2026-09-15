@@ -81,15 +81,31 @@ public final class Assets {
      * like itself. Sprites additionally get alpha blending and no back face culling.
      */
     public Material material(int complex, String group, int index, boolean sprite) {
+        return build(complex, group, index, sprite ? "#s" : "#w", sprite, sprite, sprite);
+    }
+
+    /**
+     * A decal drawn over a wall face: blended like a sprite, but on the same hand-built UVs as
+     * the wall, so it must not flip. Getting this wrong is silent — the texture simply appears
+     * upside down, which on a blood splatter is hard to notice and on a KEEP OUT sign is not.
+     */
+    public Material decal(int complex, String group, int index) {
+        return build(complex, group, index, "#d", false, true, false);
+    }
+
+    /**
+     * Wall quads carry hand-built UVs with v=0 at the top, so their textures load unflipped.
+     * Sprites sit on a jME Quad, whose generated UVs put v=0 at the bottom, so those flip.
+     */
+    private Material build(int complex, String group, int index, String kind,
+                           boolean flip, boolean blend, boolean twoSided) {
         String path = texturePath(complex, group, index);
-        String cacheKey = path + (sprite ? "#s" : "#w");
+        String cacheKey = path + kind;
         Material cached = cache.get(cacheKey);
         if (cached != null) {
             return cached;
         }
-        // Wall quads carry hand-built UVs with v=0 at the top, so their textures load unflipped.
-        // Sprites sit on a jME Quad, whose generated UVs put v=0 at the bottom, so those flip.
-        TextureKey key = new TextureKey(path, sprite);
+        TextureKey key = new TextureKey(path, flip);
         key.setGenerateMips(false);
         Texture tex = assetManager.loadTexture(key);
         tex.setMagFilter(Texture.MagFilter.Nearest);
@@ -98,11 +114,13 @@ public final class Assets {
 
         Material mat = new Material(assetManager, "Common/MatDefs/Misc/Unshaded.j3md");
         mat.setTexture("ColorMap", tex);
-        if (sprite) {
+        if (blend) {
             mat.getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
+            mat.setFloat("AlphaDiscardThreshold", 0.5f);
+        }
+        if (twoSided) {
             mat.getAdditionalRenderState().setFaceCullMode(
                     com.jme3.material.RenderState.FaceCullMode.Off);
-            mat.setFloat("AlphaDiscardThreshold", 0.5f);
         }
         cache.put(cacheKey, mat);
         return mat;

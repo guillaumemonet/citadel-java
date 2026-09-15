@@ -160,4 +160,45 @@ class AnimationTest {
         }
         assertTrue(moved, "the turn is never applied");
     }
+
+    @Test
+    @DisplayName("a plaque value picks sv_BloodOffsets entry n + 2, and only the sign animates")
+    void plaquesSitPastTheBloodDecals() {
+        // dr_AddTables: addq #2,d5 before scaling, so 1,2,3 land on entries 3,4,5
+        assertEquals(3, GfxLayout.plaqueSpriteFor(1), "card reader, red lamp");
+        assertEquals(4, GfxLayout.plaqueSpriteFor(2), "card reader, green lamp");
+        assertEquals(5, GfxLayout.plaqueSpriteFor(3), "KEEP OUT sign");
+
+        assertEquals(5, GfxLayout.plaqueSprite(5, 0));
+        assertEquals(6, GfxLayout.plaqueSprite(5, 1), "sv_DoAnims alternates entry 5 with 6");
+        assertEquals(3, GfxLayout.plaqueSprite(3, 1), "the readers are still");
+        assertEquals(4, GfxLayout.plaqueSprite(4, 1));
+    }
+
+    @Test
+    @DisplayName("a plaque is only ever drawn on a face that has a wall")
+    void plaquesNeedAWall() throws Exception {
+        // the editor sets the plaque bits freely: across LEVEL01A most of them are on open faces,
+        // which dr_AddTables never reaches because it is called from the wall drawing path
+        Level level = load("LEVEL01A.MAP");
+        int withWall = 0;
+        int without = 0;
+        for (int y = 0; y < Level.GRID; y++) {
+            for (int x = 0; x < Level.GRID; x++) {
+                for (int d = 0; d < 4; d++) {
+                    if (level.wallPlaque(x, y, d) == 0) {
+                        continue;
+                    }
+                    if (level.hasWall(x, y, d)) {
+                        withWall++;
+                    } else {
+                        without++;
+                    }
+                }
+            }
+        }
+        assertTrue(without > withWall,
+                "most plaque bits are on open faces and are never drawn");
+        assertTrue(withWall > 0, "but not all of them");
+    }
 }

@@ -68,6 +68,7 @@ public final class LevelGeometry {
         doorFaces.clear();
         animatedColumns.clear();
         animatedWall = null;
+        animatedPlaque = null;
         shownPhase = -1;
         enemyViews.clear();
         enemyNode = null;
@@ -145,6 +146,8 @@ public final class LevelGeometry {
     private final Map<Integer, Geometry> animatedColumns = new HashMap<Integer, Geometry>();
     /** Every face using the one animated wall texture, batched into a single mesh. */
     private Geometry animatedWall;
+    /** Likewise for the KEEP OUT sign, the one plaque sv_DoAnims touches. */
+    private Geometry animatedPlaque;
     private int shownPhase = -1;
 
     /**
@@ -172,6 +175,10 @@ public final class LevelGeometry {
         if (animatedWall != null && assets.exists(complex, "wall", wall)) {
             animatedWall.setMaterial(assets.material(complex, "wall", wall, false));
         }
+        int plaque = GfxLayout.plaqueSprite(GfxLayout.ANIMATED_PLAQUE_SPRITE, phase);
+        if (animatedPlaque != null && assets.exists(complex, "blood", plaque)) {
+            animatedPlaque.setMaterial(assets.decal(complex, "blood", plaque));
+        }
     }
 
     private void raise(int x, int y, int dir, float lift) {
@@ -189,6 +196,7 @@ public final class LevelGeometry {
         QuadBatch animated = new QuadBatch();
         int animatedFaces = 0;
         Map<Integer, QuadBatch> byStain = new HashMap<Integer, QuadBatch>();
+        Map<Integer, QuadBatch> byPlaque = new HashMap<Integer, QuadBatch>();
         for (int y = 0; y < Level.GRID; y++) {
             for (int x = 0; x < Level.GRID; x++) {
                 for (int d = 0; d < 4; d++) {
@@ -220,6 +228,18 @@ public final class LevelGeometry {
                             byStain.put(stain, decal);
                         }
                         addWallFace(decal, x, y, d, level.wallMirrored(x, y, d), DECAL_INSET);
+                    }
+                    // dr_AddTables: the 2-bit plaque value picks sv_BloodOffsets entry n + 2,
+                    // a card reader with a red or a green lamp, or a KEEP OUT sign
+                    int plaque = level.wallPlaque(x, y, d);
+                    if (plaque != 0) {
+                        int sprite = GfxLayout.plaqueSpriteFor(plaque);
+                        QuadBatch b = byPlaque.get(sprite);
+                        if (b == null) {
+                            b = new QuadBatch();
+                            byPlaque.put(sprite, b);
+                        }
+                        addPlaqueFace(b, x, y, d, level.wallMirrored(x, y, d));
                     }
                     if (tex == GfxLayout.ANIMATED_WALL_SPRITE) {
                         // one mesh for all of them, so the phase is one material swap a pass
@@ -253,9 +273,23 @@ public final class LevelGeometry {
                 continue;
             }
             Geometry g = new Geometry("blood:" + sprite, e.getValue().toMesh());
-            g.setMaterial(assets.material(complex, "blood", sprite, true));
+            g.setMaterial(assets.decal(complex, "blood", sprite));
             g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
             node.attachChild(g);
+        }
+
+        for (Map.Entry<Integer, QuadBatch> e : byPlaque.entrySet()) {
+            int sprite = e.getKey();
+            if (!assets.exists(complex, "blood", sprite)) {
+                continue;
+            }
+            Geometry g = new Geometry("plaque:" + sprite, e.getValue().toMesh());
+            g.setMaterial(assets.decal(complex, "blood", sprite));
+            g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
+            node.attachChild(g);
+            if (sprite == GfxLayout.ANIMATED_PLAQUE_SPRITE) {
+                animatedPlaque = g;
+            }
         }
 
         if (animatedFaces > 0) {
@@ -291,20 +325,45 @@ public final class LevelGeometry {
     /** {@code inset} lifts the quad off the face into the cell, for a decal drawn over it. */
     private void addWallFace(QuadBatch batch, int cx, int cy, int d, boolean mirrored,
                              float inset) {
+        float[] c = faceCorners(cx, cy, d, inset);
+        batch.addQuad(
+                c[0], WALL_H, c[1],
+                c[2], WALL_H, c[3],
+                c[2], 0f, c[3],
+                c[0], 0f, c[1],
+                mirrored);
+    }
+
+    /** The two ground corners of a face, anticlockwise seen from above, as {ax, az, bx, bz}. */
+    private static float[] faceCorners(int cx, int cy, int d, float inset) {
         float x0 = cx * CELL, x1 = (cx + 1) * CELL;
         float z0 = cy * CELL, z1 = (cy + 1) * CELL;
-        float ax, az, bx, bz;
         switch (d) {
-            case 0:  ax = x1; az = z1 - inset; bx = x0; bz = z1 - inset; break; // N, +Z
-            case 1:  ax = x1 - inset; az = z0; bx = x1 - inset; bz = z1; break; // E, +X
-            case 2:  ax = x0; az = z0 + inset; bx = x1; bz = z0 + inset; break; // S, -Z
-            default: ax = x0 + inset; az = z1; bx = x0 + inset; bz = z0; break; // W, -X
+            case 0:  return new float[]{x1, z1 - inset, x0, z1 - inset}; // N, +Z
+            case 1:  return new float[]{x1 - inset, z0, x1 - inset, z1}; // E, +X
+            case 2:  return new float[]{x0, z0 + inset, x1, z0 + inset}; // S, -Z
+            default: return new float[]{x0 + inset, z1, x0 + inset, z0}; // W, -X
         }
+    }
+
+    /**
+     * A plaque, drawn over the middle of the face.
+     *
+     * AT_loop2 writes 32 columns of 32 bytes starting at offset 1056 into the 64x64 tile, and
+     * 1056 is {@code 16*65 + 16}: dead centre, so the plaque covers the middle half of the face
+     * in both directions.
+     */
+    private void addPlaqueFace(QuadBatch batch, int cx, int cy, int d, boolean mirrored) {
+        float[] c = faceCorners(cx, cy, d, DECAL_INSET);
+        float ax = c[0] + 0.25f * (c[2] - c[0]);
+        float az = c[1] + 0.25f * (c[3] - c[1]);
+        float bx = c[0] + 0.75f * (c[2] - c[0]);
+        float bz = c[1] + 0.75f * (c[3] - c[1]);
         batch.addQuad(
-                ax, WALL_H, az,
-                bx, WALL_H, bz,
-                bx, 0f, bz,
-                ax, 0f, az,
+                ax, 0.75f * WALL_H, az,
+                bx, 0.75f * WALL_H, bz,
+                bx, 0.25f * WALL_H, bz,
+                ax, 0.25f * WALL_H, az,
                 mirrored);
     }
 

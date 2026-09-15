@@ -59,7 +59,7 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
 
 ## What is missing
 
-- The original HUD layout and the briefing screens (`SERVER`).
+- The briefing screens (`SERVER`), and the message line does not scroll in from the right.
 - The intro sequence itself: the animations decode to PNG frames, but nothing plays them in-game.
 - Death sequence, and the menu and briefing screens.
 
@@ -92,6 +92,8 @@ sprite tables 1-based.
 ## Credits and licence
 
 Citadel is Copyright © 1995, 2022 Virtual Design. Original code by Kane of Suspect.
+
+Java and jMonkeyEngine port by **Guillaume Monet**.
 
 The original sources come from [pawelmat/Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel).
 

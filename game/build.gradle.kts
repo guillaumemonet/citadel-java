@@ -38,6 +38,7 @@ tasks.register<JavaExec>("shot") {
     (project.findProperty("at") as String?)?.let { systemProperty("citadel.at", it) }
     (project.findProperty("frame") as String?)?.let { systemProperty("citadel.frame", it) }
     (project.findProperty("cheat") as String?)?.let { systemProperty("citadel.cheat", it) }
+    (project.findProperty("hurt") as String?)?.let { systemProperty("citadel.hurt", it) }
     (project.findProperty("pace") as String?)?.let { systemProperty("citadel.pace", it) }
     args((project.findProperty("level") as String?) ?: "LEVEL01A")
 }

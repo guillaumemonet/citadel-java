@@ -53,6 +53,10 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private Compass compass;
     private HeartMonitor heartMonitor;
     private BombGauge bombGauge;
+    /** sv_Death, the blood that runs down the view before the death card. */
+    private BloodWipe bloodWipe;
+    /** p_FadeColors, which takes the screen to black after it. */
+    private Fade fade;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
     private float mouseTurn;
@@ -149,6 +153,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         } catch (Exception e) {
             System.out.println("no CHAOSTAB.DAT, weapons will appear at once");
         }
+        bloodWipe = new BloodWipe(assetManager, cam.getWidth(), cam.getHeight());
+        fade = new Fade(assetManager, cam.getWidth(), cam.getHeight());
         heartMonitor = new HeartMonitor(assetManager);
         guiNode.attachChild(heartMonitor.picture());
         bombGauge = new BombGauge(assetManager, assets, 12f, 12f + citadel.core.Heart.HEIGHT * 4 + 8f);
@@ -664,6 +670,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                     game.typeLetter(ch);
                 }
             }
+            // -Phurt=999 kills the player, so the death sequence can be looked at
+            String hurt = System.getProperty("citadel.hurt");
+            if (hurt != null && frame == 2 && mode == Mode.PLAYING) {
+                game.inventory.hurt(Integer.parseInt(hurt));
+            }
             String walk = System.getProperty("citadel.walk");
             forward = walk != null && frame < Integer.parseInt(walk);
             // -Pframe=N moves the shot later, which is how a transition gets caught mid-flight
@@ -702,12 +713,26 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         game.update(fwd, strafe, turn, Math.min(tpf, 0.1f));
 
         if (game.isPlayerDead()) {
-            enter(Mode.DEAD);
+            serveDying(tpf);
             return;
         }
-        if (game.isLevelComplete() && !advancing) {
-            advancing = true;
-            advanceToNextLevel();
+        if (game.isLevelComplete()) {
+            // EndLevel runs TELEPORT then p_FadeColors on the way out, so the swap happens
+            // behind a black screen rather than as a cut
+            if (fade != null && !advancing) {
+                if (!fade.isRunning() && !fade.isDone()) {
+                    fade.start(guiNode);
+                }
+                fade.update(tpf);
+                if (!fade.isDone()) {
+                    return;
+                }
+                fade.clear();
+            }
+            if (!advancing) {
+                advancing = true;
+                advanceToNextLevel();
+            }
         }
 
         if (game.consumeGeometryDirty()) {
@@ -771,6 +796,36 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                 FastMath.sin(pitch),
                 (float) GameState.forwardY(game.angle) * flat);
         cam.lookAtDirection(look, Vector3f.UNIT_Y);
+    }
+
+    /**
+     * sv_Death then p_FadeColors: blood runs down the view for about four and a half seconds,
+     * then the screen goes to black, and only then does the death card come up.
+     *
+     * EndLevel returns 0 while this is running, which is how the engine holds the game open; here
+     * the same job is done by staying in PLAYING until both stages have finished.
+     */
+    private void serveDying(float tpf) {
+        if (bloodWipe == null) {
+            enter(Mode.DEAD);
+            return;
+        }
+        if (!bloodWipe.isRunning() && !bloodWipe.isDone()) {
+            bloodWipe.start(guiNode);
+        }
+        bloodWipe.update(tpf);
+        if (!bloodWipe.isDone()) {
+            return;
+        }
+        if (!fade.isRunning() && !fade.isDone()) {
+            fade.start(guiNode);
+        }
+        fade.update(tpf);
+        if (fade.isDone()) {
+            bloodWipe.clear();
+            fade.clear();
+            enter(Mode.DEAD);
+        }
     }
 
     private void topDownCamera() {

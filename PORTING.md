@@ -455,33 +455,51 @@ cost nothing.
 MainServer keeps its menus as six lines of sixteen characters with a flag byte in front of each,
 and the port takes them verbatim:
 
+```
+s_scrMain1:  1,"     START      "   s_scrTRENING: 0,"    DUNGEONS    "
+             1,"   LOAD GAME    "                 0,"    STORES 1    "
+             1,"    OPTIONS     "                 0,"    STORES 2    "
+             0,"    TRAINING    "                 0,"   LABORATORY   "
+             0,"                "                 0,"     SEWERS     "
+             0,"      INFO      "                 0,"      MENU      "
+```
 
-
-DrukTekst puts the block at , eight rows into the panel, and steps  a
+DrukTekst puts the block at `SERscr+8*16*6`, eight rows into the panel, and steps `15*16*6` a
 line — so the lines are at rows 61, 76, 91 and so on, sixteen characters from x 96. PostawKropa
-marks the chosen one with an eight pixel circle at  stepped by
-, which puts a dot either side of the line at x 88 and x 224. The flag byte picks
+marks the chosen one with an eight pixel circle at `iff_screen+[63*40*6]+11` stepped by
+`kropa*40*15*6`, which puts a dot either side of the line at x 88 and x 224. The flag byte picks
 between two glyph routines, the second of which rolls each byte four bits and writes two, drawing
 the line at double width.
 
-All five training entries turn out to ship.  names a map for each — M1T, M3T,
-M3K, M5T, M6T — and  is there beside the other four, so STORES 2 works too. The
-complex numbers double as the naming: 1 is the dungeons, 3 the stores, 5 the laboratory and 6 the
-sewers.
+All five training entries turn out to ship. `FileStructure2` names a map for each — M1T, M3T,
+M3K, M5T, M6T — and `LEVEL03K.MAP` is there beside the other four, so STORES 2 works too. None of
+those five maps was reachable from the port before. The complex numbers double as the naming: 1 is
+the dungeons, 3 the stores, 5 the laboratory and 6 the sewers.
 
 The options screen is the one place the port does not follow. The original's four are the
 renderer's — screen size, detail level, floors on or off — and none of them mean anything here,
-so only  is kept, the one the engine itself reads:  skips the point of
+so only `sv_difficult` is kept, the one the engine itself reads: `br_BumpWall` skips the point of
 energy when it is set, so easy means walking into walls is free.
 
 ### KANE.fnt
 
 The menu font, 3072 bytes, and the index arithmetic in DrukTekst gives its shape away:
 
+```asm
+subi #32,d0
+cmpi #32,d0
+bmi.s .m_d3
+subq #1,d0          ;there is no glyph for '@'
+.m_d3:
+move d0,d1
+andi #1,d1          ;which of the pair
+lsr  d0             ;which pair
+lsl  #5,d0          ;32 bytes to a pair
+or   d1,d0
+```
 
-
-So a glyph lives at  with its thirteen rows two bytes apart, the
-odd bytes belonging to its neighbour. The  is the part to remember: the font has no '@',
+So a glyph lives at `(index >> 1) * 32 + (index & 1)` with its thirteen rows two bytes apart, the
+odd bytes belonging to its neighbour. The `subq #1` is the part to remember: the font has no '@',
 so everything above it shifts down one and 'A' lands at index 32.
 
 ## Dying

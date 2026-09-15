@@ -152,6 +152,72 @@ public final class GameState {
     /** sv_Flag+2: whether the player moved this pass, which halves the rate they recover at. */
     private boolean movedThisPass;
 
+    /** CheckCodes: the ring of recent keystrokes the cheats are matched against. */
+    private final Cheats cheats = new Cheats();
+    /** sv_NieUmieraj, toggled by HOTKIWI: energy stops draining. */
+    private boolean immortal;
+    /** sv_Energy+2, the previous reading TEST_COUNTERS puts back while immortal. */
+    private int lastEnergy = Integer.MIN_VALUE;
+
+    /**
+     * CheckCodes, called from sv_joystick after every key. Applies whatever the key completed and
+     * returns true when it was a cheat, so the caller knows the key was swallowed.
+     */
+    public boolean typeLetter(char c) {
+        Cheats.Cheat cheat = cheats.type(c);
+        if (cheat == null) {
+            return false;
+        }
+        apply(cheat);
+        if (cheat.message >= 0) {
+            log.add(text(cheat.message, cheat.name().toLowerCase()));
+        }
+        return true;
+    }
+
+    private void apply(Cheats.Cheat cheat) {
+        switch (cheat) {
+            case ENERGY:
+                inventory.energy = -666;
+                lastEnergy = inventory.energy;
+                break;
+            case ARSENAL:
+                // chk_Ammo fills every weapon slot, rolls each condition, and sets each card to -6
+                for (int i = 0; i < Inventory.WEAPON_COUNT; i++) {
+                    inventory.owned[i] = true;
+                    inventory.condition[i] = rnd.nextInt(1000);
+                    inventory.ammo[i] = -666;
+                }
+                for (int i = 0; i < inventory.cards.length; i++) {
+                    inventory.cards[i] = -6;
+                }
+                break;
+            case HOP:
+                // a 1024 unit vector along the view, with no collision check at all
+                posX += (int) Math.round(forwardX() * 1024);
+                posY += (int) Math.round(forwardY() * 1024);
+                break;
+            case IMMORTAL:
+                immortal = !immortal;
+                break;
+            case MAP:
+                java.util.Arrays.fill(visited, true);
+                break;
+            case EXIT:
+                levelComplete = true;
+                break;
+            case BOMB:
+                inventory.warhead = -12;
+                break;
+            default:
+                break;
+        }
+    }
+
+    public boolean isImmortal() {
+        return immortal;
+    }
+
     /** Set when the player steps onto a teleport pad, so the view can run the TELEPORT dissolve. */
     private boolean teleported;
 
@@ -440,6 +506,13 @@ public final class GameState {
         while (heartFrames >= 1f) {
             heartFrames -= 1f;
             heart.tick(movedThisPass);
+        }
+
+        // TEST_COUNTERS: while sv_NieUmieraj is set, any change to the reading is put back
+        if (lastEnergy != Integer.MIN_VALUE && immortal && inventory.energy != lastEnergy) {
+            inventory.energy = lastEnergy;
+        } else {
+            lastEnergy = inventory.energy;
         }
 
         if (!inventory.isAlive()) {

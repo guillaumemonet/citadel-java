@@ -188,8 +188,57 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
 
     // --------------------------------------------------------------- input
 
+    /**
+     * CheckCodes watches every key the player presses, so the cheats need the raw stream rather
+     * than the named actions. The engine stores movement keys in the same ring, which is why the
+     * overlap with W, A, S, D and E does not matter.
+     */
+    private void setupCheatKeys() {
+        inputManager.addRawInputListener(new com.jme3.input.RawInputListener() {
+            @Override
+            public void onKeyEvent(com.jme3.input.event.KeyInputEvent evt) {
+                if (mode != Mode.PLAYING || !evt.isPressed() || evt.isRepeating()) {
+                    return;
+                }
+                char c = evt.getKeyChar();
+                if (c != 0 && game != null) {
+                    game.typeLetter(c);
+                }
+            }
+
+            @Override
+            public void beginInput() {
+            }
+
+            @Override
+            public void endInput() {
+            }
+
+            @Override
+            public void onJoyAxisEvent(com.jme3.input.event.JoyAxisEvent evt) {
+            }
+
+            @Override
+            public void onJoyButtonEvent(com.jme3.input.event.JoyButtonEvent evt) {
+            }
+
+            @Override
+            public void onMouseMotionEvent(com.jme3.input.event.MouseMotionEvent evt) {
+            }
+
+            @Override
+            public void onMouseButtonEvent(com.jme3.input.event.MouseButtonEvent evt) {
+            }
+
+            @Override
+            public void onTouchEvent(com.jme3.input.event.TouchEvent evt) {
+            }
+        });
+    }
+
     private void setupInput() {
         inputManager.setCursorVisible(false);
+        setupCheatKeys();
         inputManager.addMapping("fwd", new KeyTrigger(KeyInput.KEY_W), new KeyTrigger(KeyInput.KEY_UP));
         inputManager.addMapping("back", new KeyTrigger(KeyInput.KEY_S), new KeyTrigger(KeyInput.KEY_DOWN));
         inputManager.addMapping("left", new KeyTrigger(KeyInput.KEY_A));
@@ -607,6 +656,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             }
             // -Pwalk=N drives the player forward for N frames, so a shot can show where
             // walking forward actually takes you rather than only where the camera points
+            // -Pcheat=ALIBABA types a code on the verification path, since the shot harness
+            // sends no keys of its own
+            String cheat = System.getProperty("citadel.cheat");
+            if (cheat != null && frame == 2 && mode == Mode.PLAYING) {
+                for (char ch : cheat.toCharArray()) {
+                    game.typeLetter(ch);
+                }
+            }
             String walk = System.getProperty("citadel.walk");
             forward = walk != null && frame < Integer.parseInt(walk);
             // -Pframe=N moves the shot later, which is how a transition gets caught mid-flight

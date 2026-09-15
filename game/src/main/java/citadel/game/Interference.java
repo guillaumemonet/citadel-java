@@ -44,7 +44,7 @@ public final class Interference {
 
     public Interference(AssetManager assetManager, int screenWidth, int screenHeight) {
         pixels = BufferUtils.createByteBuffer(ROWS * 4);
-        Image image = new Image(Image.Format.RGBA8, 1, ROWS, pixels, ColorSpace.Linear);
+        Image image = new Image(Image.Format.RGBA8, 1, ROWS, pixels, ColorSpace.sRGB);
         texture = new Texture2D(image);
         texture.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
         texture.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);

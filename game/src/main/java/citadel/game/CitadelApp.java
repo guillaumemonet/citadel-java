@@ -759,7 +759,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         com.jme3.texture.Image px = new com.jme3.texture.Image(
                 com.jme3.texture.Image.Format.RGBA8, 1, 1,
                 com.jme3.util.BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xb0}),
-                com.jme3.texture.image.ColorSpace.Linear);
+                com.jme3.texture.image.ColorSpace.sRGB);
         hudPanel = new com.jme3.ui.Picture("hudPanel");
         hudPanel.setTexture(assetManager, new com.jme3.texture.Texture2D(px), true);
         hudPanel.getMaterial().getAdditionalRenderState()

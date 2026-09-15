@@ -170,7 +170,7 @@ public final class Screens {
             com.jme3.texture.Image img = new com.jme3.texture.Image(
                     com.jme3.texture.Image.Format.RGBA8, 1, 1,
                     BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xd8}),
-                    com.jme3.texture.image.ColorSpace.Linear);
+                    com.jme3.texture.image.ColorSpace.sRGB);
             dim = new Picture("dim");
             dim.setTexture(assetManager, new com.jme3.texture.Texture2D(img), true);
             dim.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);

@@ -44,7 +44,7 @@ public final class Automap {
 
     public Automap(AssetManager assetManager, int screenWidth, int screenHeight) {
         pixels = BufferUtils.createByteBuffer(SIZE * SIZE * 4);
-        Image image = new Image(Image.Format.RGBA8, SIZE, SIZE, pixels, ColorSpace.Linear);
+        Image image = new Image(Image.Format.RGBA8, SIZE, SIZE, pixels, ColorSpace.sRGB);
         texture = new Texture2D(image);
         texture.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
         texture.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);

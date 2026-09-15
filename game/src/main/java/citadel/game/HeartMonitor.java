@@ -39,7 +39,7 @@ public final class HeartMonitor {
 
     public HeartMonitor(AssetManager assetManager) {
         pixels = BufferUtils.createByteBuffer(W * H * 4);
-        Image image = new Image(Image.Format.RGBA8, W, H, pixels, ColorSpace.Linear);
+        Image image = new Image(Image.Format.RGBA8, W, H, pixels, ColorSpace.sRGB);
         texture = new Texture2D(image);
         texture.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
         texture.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);

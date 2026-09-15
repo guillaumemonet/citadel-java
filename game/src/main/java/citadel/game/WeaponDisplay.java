@@ -149,8 +149,10 @@ public final class WeaponDisplay {
             if (pixels == null || pixels.capacity() != width * height * 4) {
                 // a fresh buffer is already zeroed, so the first weapon fades up out of nothing
                 pixels = BufferUtils.createByteBuffer(width * height * 4);
+                // sRGB, not Linear: gamma correction is on, so a texture that claims to be
+                // linear skips the conversion on sampling and comes out washed out
                 texture = new Texture2D(new Image(Image.Format.RGBA8, width, height, pixels,
-                        ColorSpace.Linear));
+                        ColorSpace.sRGB));
                 texture.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
                 texture.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);
             }

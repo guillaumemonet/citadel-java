@@ -177,6 +177,7 @@ Done:
 - `TELEPORT`, the chaos-table dissolve from the view being left to the one arrived in
 - the heart monitor, and the exhaustion behind it that scales the walk speed
 - `ci_DrawWeapon`, the pixel-by-pixel reveal when the weapon in hand changes
+- blood stains on walls (`dr_AddBlood`)
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -184,7 +185,7 @@ Done:
 Not started:
 
 - the original HUD layout and the briefing screens (`SERVER`)
-- wall decals: blood stains (`dr_AddBlood`) and plaques / card slots (`dr_AddTables`)
+- wall plaques / card slots (`dr_AddTables`), which are still not understood - see below
 - `p_FadeColors`
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 - `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
@@ -348,12 +349,18 @@ than vanishing first; the port keeps the previous pixels in the buffer for the s
 table addresses 27 rows and the converted sprites are square, so the rows are stretched to fit —
 the same accommodation the teleport dissolve makes for the window size.
 
-## Layers in the gui bucket
+## Two things jME does quietly
 
-jME's `GuiComparator` subtracts two Z values and **casts the result to int**, so anything less
-than 1 apart compares equal and the draw order silently falls back to whichever was attached
-first. The overlays are therefore whole numbers apart, in the engine's own order: the dissolve and
-the interference paint the view, then the compass, the automap and the readout go over the result.
+**Layer order.** `GuiComparator` subtracts two Z values and **casts the result to int**, so
+anything less than 1 apart compares equal and the draw order silently falls back to whichever was
+attached first. The overlays are therefore whole numbers apart, in the engine's own order: the
+dissolve and the interference paint the view, then the compass, the automap, the weapon and the
+readout go over the result.
+
+**Colour space.** Gamma correction is on by default, so a `Texture2D` built by hand has to declare
+`ColorSpace.sRGB`. Declaring `Linear` means the sampler skips the conversion, and every
+hand-generated overlay — the automap, the compass, the heart monitor, the interference, the held
+weapon — comes out visibly washed out next to anything the asset manager loaded.
 
 ## Decals, and what is still unclear about them
 

@@ -39,6 +39,8 @@ public final class LevelGeometry {
     public static final float CELL = 1f;
     /** Wall height, in world units. */
     public static final float WALL_H = 1f;
+    /** How far a decal sits in front of the face it is drawn on, to keep it out of the z-fight. */
+    private static final float DECAL_INSET = 0.002f;
 
     private final Level level;
     private final Assets assets;
@@ -186,6 +188,7 @@ public final class LevelGeometry {
         Map<Integer, QuadBatch> byTexture = new HashMap<Integer, QuadBatch>();
         QuadBatch animated = new QuadBatch();
         int animatedFaces = 0;
+        Map<Integer, QuadBatch> byStain = new HashMap<Integer, QuadBatch>();
         for (int y = 0; y < Level.GRID; y++) {
             for (int x = 0; x < Level.GRID; x++) {
                 for (int d = 0; d < 4; d++) {
@@ -204,6 +207,19 @@ public final class LevelGeometry {
                         doorTextures.put(key, tex);
                         addDoorFace(node, x, y, d, tex);
                         continue;
+                    }
+                    // dr_AddBlood: bits 6..7 of the wall byte, less one, pick one of three
+                    // 64x64 decals. The engine composites them onto a scratch copy of the wall
+                    // texture; here they are a quad a whisker in front of the face, which comes
+                    // out the same and costs one draw call per stain for a whole level.
+                    int stain = level.wallBlood(x, y, d);
+                    if (stain != 0) {
+                        QuadBatch decal = byStain.get(stain);
+                        if (decal == null) {
+                            decal = new QuadBatch();
+                            byStain.put(stain, decal);
+                        }
+                        addWallFace(decal, x, y, d, level.wallMirrored(x, y, d), DECAL_INSET);
                     }
                     if (tex == GfxLayout.ANIMATED_WALL_SPRITE) {
                         // one mesh for all of them, so the phase is one material swap a pass
@@ -228,6 +244,17 @@ public final class LevelGeometry {
                     : assets.material(complex, "wall", 0, false);
             Geometry g = new Geometry("wall:" + tex, e.getValue().toMesh());
             g.setMaterial(mat);
+            node.attachChild(g);
+        }
+
+        for (Map.Entry<Integer, QuadBatch> e : byStain.entrySet()) {
+            int sprite = GfxLayout.spriteIndexFor(e.getKey());
+            if (!assets.exists(complex, "blood", sprite)) {
+                continue;
+            }
+            Geometry g = new Geometry("blood:" + sprite, e.getValue().toMesh());
+            g.setMaterial(assets.material(complex, "blood", sprite, true));
+            g.setQueueBucket(com.jme3.renderer.queue.RenderQueue.Bucket.Transparent);
             node.attachChild(g);
         }
 
@@ -258,14 +285,20 @@ public final class LevelGeometry {
      * winding below produce the right normal for all four directions.
      */
     private void addWallFace(QuadBatch batch, int cx, int cy, int d, boolean mirrored) {
+        addWallFace(batch, cx, cy, d, mirrored, 0f);
+    }
+
+    /** {@code inset} lifts the quad off the face into the cell, for a decal drawn over it. */
+    private void addWallFace(QuadBatch batch, int cx, int cy, int d, boolean mirrored,
+                             float inset) {
         float x0 = cx * CELL, x1 = (cx + 1) * CELL;
         float z0 = cy * CELL, z1 = (cy + 1) * CELL;
         float ax, az, bx, bz;
         switch (d) {
-            case 0:  ax = x1; az = z1; bx = x0; bz = z1; break; // N, +Z
-            case 1:  ax = x1; az = z0; bx = x1; bz = z1; break; // E, +X
-            case 2:  ax = x0; az = z0; bx = x1; bz = z0; break; // S, -Z
-            default: ax = x0; az = z1; bx = x0; bz = z0; break; // W, -X
+            case 0:  ax = x1; az = z1 - inset; bx = x0; bz = z1 - inset; break; // N, +Z
+            case 1:  ax = x1 - inset; az = z0; bx = x1 - inset; bz = z1; break; // E, +X
+            case 2:  ax = x0; az = z0 + inset; bx = x1; bz = z0 + inset; break; // S, -Z
+            default: ax = x0 + inset; az = z1; bx = x0 + inset; bz = z0; break; // W, -X
         }
         batch.addQuad(
                 ax, WALL_H, az,

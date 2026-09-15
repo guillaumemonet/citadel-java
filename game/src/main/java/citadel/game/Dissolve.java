@@ -187,7 +187,7 @@ public final class Dissolve implements SceneProcessor {
 
     private void build() {
         frameBytes = BufferUtils.createByteBuffer(width * height * 4);
-        Image image = new Image(Image.Format.BGRA8, width, height, frameBytes, ColorSpace.Linear);
+        Image image = new Image(Image.Format.BGRA8, width, height, frameBytes, ColorSpace.sRGB);
         texture = new Texture2D(image);
         texture.setMagFilter(com.jme3.texture.Texture.MagFilter.Nearest);
         texture.setMinFilter(com.jme3.texture.Texture.MinFilter.NearestNoMipMaps);

@@ -110,6 +110,8 @@ public final class GameState {
     private boolean playerDead;
     /** Frames until the low-energy warning beeps again, from do_pikaj's 55 frame reload. */
     private float beepCountdown;
+    /** VBLANK frames owed to the heart monitor; float for the same reason secondFrames is. */
+    private float heartFrames;
     /** True when the last move ran into something hard enough to count, per br_BumpWall. */
     private boolean bumped;
     /**
@@ -139,6 +141,14 @@ public final class GameState {
         return szumFrame;
     }
 
+    /**
+     * DRAW_HEART: the heart monitor, and with it the exhaustion that scales the walk speed.
+     * Public because the readout draws straight from it.
+     */
+    public final Heart heart = new Heart();
+    /** sv_Flag+2: whether the player moved this pass, which halves the rate they recover at. */
+    private boolean movedThisPass;
+
     /** Set when the player steps onto a teleport pad, so the view can run the TELEPORT dissolve. */
     private boolean teleported;
 
@@ -167,6 +177,7 @@ public final class GameState {
      */
     void jolt() {
         szum();
+        heart.excite();
         // GetRandom / asr.b #4,d0 / ext d0 - a signed byte shifted down 4, so -8..7
         angle = (angle + ((byte) rnd.nextInt(256) >> 4)) & 511;
     }
@@ -369,6 +380,7 @@ public final class GameState {
      * this loop, not per video frame.
      */
     private void stepLoop(float forward, float strafe, float turn) {
+        movedThisPass = false;   // sv_joystick clears sv_Flag+2, sv_DoMMove sets it again if moved
         if (turn != 0f) {
             // A rising angle sweeps west, north, east, south, which is clockwise seen from above,
             // so turning right must *increase* it. Subtracting here mirrored every control.
@@ -383,9 +395,10 @@ public final class GameState {
                 forward /= mag;
                 strafe /= mag;
             }
-            double dx = (forward * forwardX() + strafe * rightX()) * inventory.walkSpeed();
-            double dy = (forward * forwardY() + strafe * rightY()) * inventory.walkSpeed();
+            double dx = (forward * forwardX() + strafe * rightX()) * walkSpeed();
+            double dy = (forward * forwardY() + strafe * rightY()) * walkSpeed();
             bumped = false;
+            movedThisPass = true;
             step(dx, dy);
             // br_BumpWall only counts a collision when the move was a real stride: it needs the
             // vector length at 120 or more, so brushing a wall while edging along costs nothing.
@@ -419,8 +432,16 @@ public final class GameState {
             levelSeconds++;
         }
 
+        // NewLev3 calls Draw_Heart every VBLANK, and that is where regeneration happens
+        heartFrames += frames;
+        while (heartFrames >= 1f) {
+            heartFrames -= 1f;
+            heart.tick(movedThisPass);
+        }
+
         if (!inventory.isAlive()) {
             playerDead = true;
+            heart.setFlatline(true);
             log.add(text(39, "you are dead"));
             playSound(SoundTable.PLAYER_HURT);
             return;
@@ -436,11 +457,21 @@ public final class GameState {
         }
     }
 
+    /**
+     * sc_NormWalk: a winded player is a slower one, down to 65% at the worst. The speed potion
+     * takes the base speed straight, which is what {@code tst sv_WalkSpeed+6} skips ahead to.
+     */
+    private int walkSpeed() {
+        int base = inventory.walkSpeed();
+        return inventory.isSpeedBoosted() ? base : heart.walkSpeed(base);
+    }
+
     /** br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult. */
     private void hitWall() {
         inventory.hurt(1);
         log.add(text(TextTable.BUMP_WALL, "ouch"));
         szum();
+        heart.excite();
     }
 
     /**

@@ -175,6 +175,7 @@ Done:
 - texture animation: the animated wall, the three animated columns, and the shared enemy walk phase
 - `sv_MAKE_SZUM`, the interference burst when a shot lands or the player walks into a wall
 - `TELEPORT`, the chaos-table dissolve from the view being left to the one arrived in
+- the heart monitor, and the exhaustion behind it that scales the walk speed
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -185,7 +186,7 @@ Not started:
 - wall decals: blood stains (`dr_AddBlood`) and plaques / card slots (`dr_AddTables`)
 - `p_FadeColors`
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
-- `DRAW_HEART` / `EXCITE`, `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
+- `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
 - `ci_DrawWeapon`'s chaos dissolve when the weapon in hand changes
 
 ## Saves
@@ -257,6 +258,42 @@ counter on `GameState` and feeds it to all four. `LEVEL01A` alone has 48 animate
 
 The animated wall faces are batched into one mesh with a swappable material rather than one
 geometry each; the columns are already billboards, so they only change material.
+
+## Exhaustion, and the heart monitor
+
+`DRAW_HEART` looks like a decoration and is not. The word at `sc_PosTab+2` is the length of the
+trace cycle, so a smaller value repeats the spike sooner and the heart visibly races — and
+`sc_NormWalk`, at the bottom of the same routine, reads that same word to set the walk speed:
+
+```asm
+sc_NormWalk:    lea     sc_PosTab(pc),a1        ;speed & exhaust
+                move    2(a1),d0
+                addi    #288,d0                 ;max 512
+                move    sv_WalkSpeed+2,d1
+                mulu    d0,d1
+                lsr.l   #8,d1
+                lsr     d1                      ;/512
+                move    d1,sv_WalkSpeed
+```
+
+`EXCITE` knocks `11*4` off the word, down to a floor of `11*4`; `DRAW_HEART` adds 4 back whenever
+its own countdown expires. So the beat runs between 44 and 224, the speed between `332/512` and
+`512/512` of base, and a fully winded player walks at **65%** until they get their breath back.
+
+Recovery is 4 every 25 VBLANK frames standing still and every 50 while moving — `sv_Flag+2`, set
+by `sv_DoMMove` and cleared by `sv_joystick` each pass. From the floor back to rest is 45 steps,
+so about 22 seconds of standing still or 45 of walking.
+
+`EXCITE` fires when the player is hurt (`oc_PlayerHit`), walks into a wall (`br_BumpWall`), or
+sets off their own fireball, bolt or rocket at point blank range. A speed potion takes the base
+speed straight and ignores all of this, which is the `tst sv_WalkSpeed+6` at the top of the block.
+
+The trace itself is a 29 column window onto a 32 entry ring, one vertical run per column. The
+`bset/bset/bclr/bclr/bset` pattern over five interleaved bitplanes spells out index 19, the same
+green in every palette.
+
+**Not ported:** the three point-blank cases also cost energy and shove the player, and the shove
+is left out for the same reason as the others.
 
 ## Interference
 

@@ -51,6 +51,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private BitmapText hud;
     private Automap automap;
     private Compass compass;
+    private HeartMonitor heartMonitor;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
     private float mouseTurn;
@@ -141,8 +142,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         guiNode.attachChild(compass.picture());
         // the burst goes over the view but under the furniture: sv_MAKE_SZUM paints the chunky
         // buffer before sv_copy, and COMPASS and UpdateMap run after it
+        heartMonitor = new HeartMonitor(assetManager);
+        guiNode.attachChild(heartMonitor.picture());
         layer(automap.picture(), Z_FURNITURE);
         layer(compass.picture(), Z_FURNITURE);
+        layer(heartMonitor.picture(), Z_FURNITURE);
         syncCamera();
 
         screens = new Screens(assetManager, guiNode,
@@ -644,6 +648,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         geometry.syncProjectiles(game);
         automap.update(game);
         compass.update(game);
+        heartMonitor.update(game);
         interference.update(guiNode, game.szumActive(), game.szumFrame());
         syncWeaponView(assets, Assets.complexOf(currentMap));
         sound.serve(game);

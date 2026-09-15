@@ -80,6 +80,11 @@ public final class Inventory {
         return speedBoost > 0 ? 300 : GameState.WALK_SPEED;
     }
 
+    /** True while a speed potion is running, which takes the walk speed out of the heart's hands. */
+    public boolean isSpeedBoosted() {
+        return speedBoost > 0;
+    }
+
     public void tick() {
         if (speedBoost > 0) {
             speedBoost--;

@@ -18,6 +18,9 @@ public final class GameState {
      * min_distance, from the equate {@code [500 * 2^SHLeft / mc_maxHeigth] + 2} evaluated with
      * 68000 integer division: 500 * 256 / 350 = 365, + 2.
      */
+    /** DrawBomb: {@code addi #77,d0}, the first of the six warhead section messages. */
+    public static final int BOMB_TEXT = 77;
+
     public static final int MIN_DISTANCE = 367;
     /** How close the player's centre may get to a wall, i.e. min_distance - 60 in sv_Border. */
     public static final int PLAYER_RADIUS = MIN_DISTANCE - 60;
@@ -520,7 +523,16 @@ public final class GameState {
         // Take_Items computes its SCROLL1 index as base + offset, and every branch works out to
         // the item value itself: weapons 2 + (v-2), ammunition 8 + (v-8), cards 14 + (v-14), and
         // the rest are literal SCROLLs at 17, 18 and 19.
-        log.add(text(item, what));
+        //
+        // A warhead section is the exception. ti_Head falls through without a SCROLL of its own;
+        // DrawBomb prints it, at 77 plus the stage, so the six sections each get their own line
+        // from "FOUND THE FIRST PART OF THE BOMB!" to "YOU FOUND THE LAST PART OF THE BOMB!!!".
+        if (item == Inventory.WARHEAD) {
+            int stage = BombGfx.stageFor(inventory.warhead);
+            log.add(text(BOMB_TEXT + Math.max(0, stage), what));
+        } else {
+            log.add(text(item, what));
+        }
     }
 
     /**

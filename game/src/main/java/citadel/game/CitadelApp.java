@@ -52,6 +52,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     private Automap automap;
     private Compass compass;
     private HeartMonitor heartMonitor;
+    private BombGauge bombGauge;
 
     private boolean forward, back, left, right, turnLeft, turnRight;
     private float mouseTurn;
@@ -150,6 +151,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
         heartMonitor = new HeartMonitor(assetManager);
         guiNode.attachChild(heartMonitor.picture());
+        bombGauge = new BombGauge(assetManager, assets, 12f, 12f + citadel.core.Heart.HEIGHT * 4 + 8f);
         layer(automap.picture(), Z_FURNITURE);
         layer(compass.picture(), Z_FURNITURE);
         layer(heartMonitor.picture(), Z_FURNITURE);
@@ -453,6 +455,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         if (heartMonitor != null) {
             heartMonitor.picture().setCullHint(hint);
         }
+        if (bombGauge != null) {
+            bombGauge.picture().setCullHint(hint);
+        }
         if (compass != null) {
             compass.picture().setCullHint(hint);
         }
@@ -658,6 +663,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         automap.update(game);
         compass.update(game);
         heartMonitor.update(game);
+        bombGauge.update(guiNode, game, Assets.complexOf(currentMap));
         interference.update(guiNode, game.szumActive(), game.szumFrame());
         if (weaponDisplay != null) {
             weaponDisplay.sync(guiNode, game, Assets.complexOf(currentMap),

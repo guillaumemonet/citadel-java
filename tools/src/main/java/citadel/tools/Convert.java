@@ -1,5 +1,6 @@
 package citadel.tools;
 
+import citadel.core.BombGfx;
 import citadel.core.GfxLayout;
 import citadel.core.Io;
 import citadel.core.MapFile;
@@ -144,6 +145,7 @@ public final class Convert {
                 log.append(String.format("%-20s %7d  %2dx%-3d %s%n",
                         e.fileName(), e.offset, e.width, e.height, e.note));
             }
+            writeBomb(dir, pal, log);
             log.append('\n');
             System.out.printf("complex %d: %d graphics written, %d empty slots skipped%n",
                     complex, written, blank);
@@ -158,6 +160,34 @@ public final class Convert {
         }
         byte[] d = Io.readAll(f);
         System.arraycopy(d, 0, block, at, Math.min(d.length, block.length - at));
+    }
+
+    /**
+     * Store/Bomba.rawb, the six stages of the warhead gauge. It lives outside the .VIR block and
+     * is five interleaved bitplanes rather than chunky bytes, so it needs its own decode.
+     */
+    private void writeBomb(File dir, Palette pal, StringBuilder log) throws IOException {
+        File src = new File(new File(dataRoot, "GAME/Store"), "Bomba.rawb");
+        if (!src.isFile()) {
+            return;
+        }
+        BombGfx bomb = BombGfx.load(src);
+        int[] lut = pal.lut(true);
+        for (int stage = 0; stage < BombGfx.STAGES; stage++) {
+            int[] px = bomb.pixels(stage);
+            BufferedImage img = new BufferedImage(BombGfx.WIDTH, BombGfx.HEIGHT,
+                    BufferedImage.TYPE_INT_ARGB);
+            for (int y = 0; y < BombGfx.HEIGHT; y++) {
+                for (int x = 0; x < BombGfx.WIDTH; x++) {
+                    img.setRGB(x, y, lut[px[y * BombGfx.WIDTH + x] & 31]);
+                }
+            }
+            String name = String.format("bomb_%02d.png", stage);
+            ImageIO.write(img, "png", new File(dir, name));
+            log.append(String.format("%-20s %7s  %2dx%-3d %s%n",
+                    name, "Bomba", BombGfx.WIDTH, BombGfx.HEIGHT,
+                    "warhead gauge, " + (stage + 1) + " of 6 sections"));
+        }
     }
 
     private BufferedImage paletteStrip(Palette pal) {

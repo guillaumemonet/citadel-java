@@ -119,6 +119,13 @@ scratch buffer — with the flag or-ed back in.
 Worth knowing when reading a map dump: the editor sets plaque bits freely, and only **81** of the
 754 plaque faces in the shipped campaign have a wall to be drawn on.
 
+### `Store/Bomba.rawb`
+
+5580 bytes, and the `equ` for `sv_Bomba` declares `$15cc` — the same number. Six stages of the
+48 by 31 warhead gauge, five interleaved bitplanes rather than chunky bytes, so it needs its own
+decode: 155 rows of 36, where row i is screen row i / 5 in plane i % 5, and the six stages sit
+six bytes apart within each row. The converter writes them as `bomb_00.png` to `bomb_05.png`.
+
 ### Animation: `sv_AnimOffsets`
 
 `sv_DoAnims` rewrites table entries once per pass of `MAIN_LOOP`:

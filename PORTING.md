@@ -174,6 +174,7 @@ Done:
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
 - texture animation: the animated wall, the three animated columns, and the shared enemy walk phase
 - `sv_MAKE_SZUM`, the interference burst when a shot lands or the player walks into a wall
+- `TELEPORT`, the chaos-table dissolve from the view being left to the one arrived in
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -182,7 +183,7 @@ Not started:
 
 - the original HUD layout and the briefing screens (`SERVER`)
 - wall decals: blood stains (`dr_AddBlood`) and plaques / card slots (`dr_AddTables`)
-- full-screen effects: the `TELEPORT` stretch and `p_FadeColors`
+- `p_FadeColors`
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 - `DRAW_HEART` / `EXCITE`, `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
 - `ci_DrawWeapon`'s chaos dissolve when the weapon in hand changes
@@ -274,6 +275,32 @@ both events are not: `br_BumpWall` writes a rebound into `sv_LastMove+4/+6`, and
 adds four times the shot's velocity to `sv_AddMove` - which `sv_DoRotIt` then reads back under
 `andi #$ff`, destroying the sign and sending a negative push the wrong way. That one is a bug in
 the original, and reproducing it would only feel broken.
+
+## The teleport dissolve
+
+`TELEPORT` is not a distortion, which is what the name suggests; it is a dissolve. Both views are
+in hand — the new one is already drawn in the hidden buffer — and it copies the new over the old
+four pixels and two rows at a time, in the order `Store/CHAOSTAC.DAT` gives, 32 VBLANK frames of
+32 entries each.
+
+The file is a **permutation of 0..1023**, and `te_loop3` reuses each entry at five offsets 1024
+apart, so the walk visits 32 x 32 x 5 = 5120 cells. `divu d0,d5` with d0 = 80 splits an offset
+into a nibble column and a row pair: 80 columns of four pixels is 320 across, and 5120 / 80 = 64
+row pairs is 128 down. That is the whole view, each cell exactly once — which is why the
+transition finishes clean rather than leaving patches behind. The narrow view setting takes
+d0 = 48 and three repeats and works out the same way, at 192 by 128.
+
+The port has only the new view, since that is whatever the scene renders, so it needs the old one
+instead: the framebuffer is read once on the frame the teleport lands, held on top as a texture,
+and eaten away by the same table. The camera is kept still for that single frame so the read
+catches the view being left rather than the one arrived in.
+
+## Layers in the gui bucket
+
+jME's `GuiComparator` subtracts two Z values and **casts the result to int**, so anything less
+than 1 apart compares equal and the draw order silently falls back to whichever was attached
+first. The overlays are therefore whole numbers apart, in the engine's own order: the dissolve and
+the interference paint the view, then the compass, the automap and the readout go over the result.
 
 ## Decals, and what is still unclear about them
 

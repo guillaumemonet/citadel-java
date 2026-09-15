@@ -126,6 +126,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         setupInput();
         setupHud();
         interference = new Interference(assetManager, cam.getWidth(), cam.getHeight());
+        try {
+            dissolve = new Dissolve(assetManager,
+                    citadel.core.ChaosTable.loadFrom(assets.dataRoot()),
+                    cam.getWidth(), cam.getHeight());
+            viewPort.addProcessor(dissolve);
+        } catch (Exception e) {
+            System.out.println("no CHAOSTAC.DAT, teleports will cut straight over");
+        }
         automap = new Automap(assetManager, cam.getWidth(), cam.getHeight());
         guiNode.attachChild(automap.picture());
         compass = new Compass(assetManager, cam.getWidth(), cam.getHeight(),
@@ -133,8 +141,8 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         guiNode.attachChild(compass.picture());
         // the burst goes over the view but under the furniture: sv_MAKE_SZUM paints the chunky
         // buffer before sv_copy, and COMPASS and UpdateMap run after it
-        raiseOverInterference(automap.picture());
-        raiseOverInterference(compass.picture());
+        layer(automap.picture(), Z_FURNITURE);
+        layer(compass.picture(), Z_FURNITURE);
         syncCamera();
 
         screens = new Screens(assetManager, guiNode,
@@ -583,9 +591,11 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             // walking forward actually takes you rather than only where the camera points
             String walk = System.getProperty("citadel.walk");
             forward = walk != null && frame < Integer.parseInt(walk);
-            if (frame == 20) {
+            // -Pframe=N moves the shot later, which is how a transition gets caught mid-flight
+            int shotAt = Integer.getInteger("citadel.frame", 20);
+            if (frame == shotAt) {
                 shots.takeScreenshot();
-            } else if (frame > 25) {
+            } else if (frame > shotAt + 5) {
                 stop();
             }
         }
@@ -637,8 +647,31 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         interference.update(guiNode, game.szumActive(), game.szumFrame());
         syncWeaponView(assets, Assets.complexOf(currentMap));
         sound.serve(game);
-        syncCamera();
+        serveTeleport(tpf);
+        if (!holdingCamera) {
+            syncCamera();
+        }
         updateHud();
+    }
+
+    /**
+     * TELEPORT: keep the old view on screen for one frame so it can be read back, then dissolve
+     * it away over the new one.
+     */
+    private void serveTeleport(float tpf) {
+        if (dissolve == null) {
+            return;
+        }
+        dissolve.update(tpf);
+        if (holdingCamera) {
+            holdingCamera = false;
+            if (dissolve.isCaptured()) {
+                dissolve.start(guiNode);
+            }
+        } else if (game.consumeTeleported()) {
+            holdingCamera = true;
+            dissolve.arm();
+        }
     }
 
     /**
@@ -671,9 +704,30 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     /** sv_MAKE_SZUM, the static burst when a shot lands or the player walks into a wall. */
     private Interference interference;
 
-    private static void raiseOverInterference(com.jme3.scene.Spatial s) {
+    /** TELEPORT, the chaos-table dissolve from the view being left to the one arrived in. */
+    private Dissolve dissolve;
+    /**
+     * True for the single frame between a teleport landing and the camera following it. The old
+     * view has to still be on screen when the framebuffer is read, so the camera waits one frame.
+     */
+    private boolean holdingCamera;
+
+    /**
+     * Layers in the gui bucket, bottom to top. They have to be whole numbers apart: jME's
+     * GuiComparator subtracts the two Z values and casts the result to int, so anything closer
+     * together than 1 compares equal and the order falls back on whatever was attached first.
+     *
+     * The order follows the engine's own: the TELEPORT dissolve and sv_MAKE_SZUM paint the view
+     * buffer, then COMPASS, UpdateMap and the readout are drawn over the result.
+     */
+    static final float Z_DISSOLVE = 1f;
+    static final float Z_INTERFERENCE = 2f;
+    static final float Z_FURNITURE = 3f;
+    static final float Z_TEXT = 4f;
+
+    private static void layer(com.jme3.scene.Spatial s, float z) {
         com.jme3.math.Vector3f t = s.getLocalTranslation();
-        s.setLocalTranslation(t.x, t.y, Interference.Z + 0.1f);
+        s.setLocalTranslation(t.x, t.y, z);
     }
 
     /** Dark band the readout sits on, since white text on a lit ceiling is barely there. */
@@ -735,13 +789,13 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         hudPanel.setWidth(cam.getWidth());
         hudPanel.setHeight(bandHeight);
         hudPanel.setPosition(0, cam.getHeight() - bandHeight);
-        raiseOverInterference(hudPanel);
+        layer(hudPanel, Z_FURNITURE);
         guiNode.attachChild(hudPanel);
 
         hud = new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));
         hud.setSize(19f);
         hud.setColor(ColorRGBA.White);
-        hud.setLocalTranslation(12f, cam.getHeight() - 8f, 1f);
+        hud.setLocalTranslation(12f, cam.getHeight() - 8f, Z_TEXT);
         guiNode.attachChild(hud);
     }
 

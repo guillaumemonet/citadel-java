@@ -139,6 +139,15 @@ public final class GameState {
         return szumFrame;
     }
 
+    /** Set when the player steps onto a teleport pad, so the view can run the TELEPORT dissolve. */
+    private boolean teleported;
+
+    public boolean consumeTeleported() {
+        boolean was = teleported;
+        teleported = false;
+        return was;
+    }
+
     /**
      * Two passes of sv_MAKE_SZUM, which fills 81 randomly chosen rows of the 128 row view with
      * byte $88 - palette index 17, once the chunky to planar convention is undone.
@@ -634,6 +643,7 @@ public final class GameState {
                 lastInX = 512;
                 lastInY = 512;
                 log.add("teleported to (" + t.toX + "," + t.toY + ")");
+                teleported = true;
                 return true;
             }
         }

@@ -36,6 +36,7 @@ tasks.register<JavaExec>("shot") {
     (project.findProperty("walk") as String?)?.let { systemProperty("citadel.walk", it) }
     (project.findProperty("cam") as String?)?.let { systemProperty("citadel.cam", it) }
     (project.findProperty("at") as String?)?.let { systemProperty("citadel.at", it) }
+    (project.findProperty("frame") as String?)?.let { systemProperty("citadel.frame", it) }
     (project.findProperty("pace") as String?)?.let { systemProperty("citadel.pace", it) }
     args((project.findProperty("level") as String?) ?: "LEVEL01A")
 }

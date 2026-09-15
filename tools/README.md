@@ -125,6 +125,16 @@ plainly is not meant to be. Until that is resolved the renderer draws no plaques
 | `sv_CollumnOffsets[20]` | sprites 20, 21, 22, 23 |
 | `sv_WalkState` | 0, 2, 4, 6, the enemy walk phase shared by every enemy |
 
+### `Store/CHAOSTAC.DAT`
+
+2048 bytes, 1024 big endian words, and a **permutation of 0..1023**. `TELEPORT` reads it in
+order, 32 entries per VBLANK frame for 32 frames, reusing each entry at five offsets 1024 apart,
+which comes to 5120 cells of four pixels by two rows: the whole 320 by 128 view exactly once.
+`citadel.core.ChaosTable` reads it and hands out the cells frame by frame.
+
+`CHAOSTAB.DAT` is its sibling, used by `ci_DrawWeapon` for the weapon-change dissolve, and is not
+read yet.
+
 ## Levels: `LEVELnnX.MAP`
 
 About 37 KB. Addresses inside a map are `y * 512 + x * 8 + sub`, i.e. the raw byte offset of the
@@ -255,7 +265,7 @@ the rest. Worth confirming against `IntroReplayer_125.ss` before building on it.
 - `Store/ROTTABLE.DAT`, 64 pre-sorted cell visibility lists, one per view angle. The software
   renderer walks these back to front; a jMonkeyEngine port does its own culling and will not need
   them.
-- `Store/IWT.DAT`, `TABLES.DAT`, `CHAOSTAB/TAC.DAT`, `SINTABLE.DAT`: engine lookup tables and
+- `Store/IWT.DAT`, `TABLES.DAT`, `CHAOSTAB.DAT`, `SINTABLE.DAT`: engine lookup tables and
   screen furniture.
 - `Store/TEXT.POL` / `TEXT.ENG` / `TEXT.GER`: in-game strings, indexed by `sv_TextOffsets`.
 - The IFF artwork under `Data/GAME/Gfx_IFF` and `Data/INTRO`. `citadel.tools.IffReader` decodes

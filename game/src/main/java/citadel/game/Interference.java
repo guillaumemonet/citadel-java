@@ -34,8 +34,7 @@ public final class Interference {
     private static final int STREAKS = 81;
     /** Palette index 17, a fixed engine colour identical in all eight complexes. */
     private static final int COLOUR = 0xff9999dd;
-    /** Z in the gui bucket: over the view, under the compass, map and readout. */
-    public static final float Z = 0.3f;
+
 
     private final Picture picture;
     private final Texture2D texture;
@@ -55,7 +54,7 @@ public final class Interference {
         picture.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Alpha);
         picture.setWidth(screenWidth);
         picture.setHeight(screenHeight);
-        picture.setLocalTranslation(0f, 0f, Z);
+        picture.setLocalTranslation(0f, 0f, CitadelApp.Z_INTERFERENCE);
     }
 
     public Picture picture() {

@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 101 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 107 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -290,7 +290,8 @@ Recovery is 4 every 25 VBLANK frames standing still and every 50 while moving �
 by `sv_DoMMove` and cleared by `sv_joystick` each pass. From the floor back to rest is 45 steps,
 so about 22 seconds of standing still or 45 of walking.
 
-`EXCITE` fires when the player is hurt (`oc_PlayerHit`), walks into a wall (`br_BumpWall`), or
+`EXCITE` fires when the player is hurt (`oc_PlayerHit`), walks into a wall (`br_BumpWall` — see
+**Bumping into things** for what counts as walking into one), or
 sets off their own fireball, bolt or rocket at point blank range. A speed potion takes the base
 speed straight and ignores all of this, which is the `tst sv_WalkSpeed+6` at the top of the block.
 
@@ -481,6 +482,37 @@ approximation.
 It runs at the end of both ways out of a level: after `TELEPORT` when the exit is reached, and
 after `sv_Death`. So a level change happens behind a black screen rather than as a cut, and the
 port now does that too.
+
+## Bumping into things
+
+`br_BumpWall` opens with two tests, and the port had only the second of them:
+
+```asm
+br_BumpWall:    bmi.w   br_BW1
+                cmpi    #124,d5
+                bpl.w   br_BW1
+                move    sv_LastMove,d5      ;bump into wall
+                cmpi    #120,d5
+                bmi.w   br_BW1
+```
+
+The second is the stride: the move has to be 120 units or more. The first is the **angle**, and it
+is the one that matters. Every caller hands the routine `sv_LastMove+2` — the direction of the
+move — less the angle that would take it straight into that face, plus 62; landing outside 124
+throws the collision away. So a bump only counts within 62 units of head on, about 44 degrees, and
+brushing a wall as you walk along it is free.
+
+Without it, walking along any wall bumps every single pass: a point of energy, an insult, a jolt
+to the heart and a burst of interference, over and over. That is what it looked like in play.
+
+The engine's head-on angles are 0 east, 256 west, 128 north and 378 south. The first two are the
+other way round in this port because its X axis is mirrored against the engine's; the south one is
+straightened from 378 to 384, a six unit skew that is either a slip or a hand-tuned fudge and is
+four degrees either way.
+
+**Z** toggles the burst, as `cc_z` does — *zakłócenia* is Polish for interference — printing
+DISTURBANCES: ON or OFF. `MAIN_LOOP` tests `cc_RequestTab2` before calling `sv_MAKE_SZUM` and
+leaves the counter running underneath, so the port does the same.
 
 ## Interference
 

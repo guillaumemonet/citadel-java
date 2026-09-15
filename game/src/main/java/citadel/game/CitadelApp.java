@@ -222,9 +222,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
                     return;
                 }
                 char c = evt.getKeyChar();
-                if (c != 0 && game != null) {
-                    game.typeLetter(c);
+                if (c == 0 || game == null) {
+                    return;
                 }
+                // cc_z: Z turns the interference burst on and off, as in the original
+                if (c == 'z' || c == 'Z') {
+                    game.toggleSzum();
+                }
+                game.typeLetter(c);
             }
 
             @Override

@@ -136,8 +136,22 @@ public final class GameState {
     /** Changes every pass the burst is drawn, so the renderer re-rolls its rows as the engine does. */
     private int szumFrame;
 
+    /**
+     * cc_RequestTab2, which the Z key toggles — "zakłócenia" is Polish for interference. The
+     * counter still runs; MAIN_LOOP just skips the call to sv_MAKE_SZUM while this is set.
+     */
+    private boolean szumOff;
+
+    /** @return true when the burst is now on */
+    public boolean toggleSzum() {
+        szumOff = !szumOff;
+        // SCROLL 91 is DISTURBANCES: ON and 92 is OFF
+        log.add(text(szumOff ? 92 : 91, szumOff ? "disturbances off" : "disturbances on"));
+        return !szumOff;
+    }
+
     public boolean szumActive() {
-        return szumTime > 0;
+        return szumTime > 0 && !szumOff;
     }
 
     public int szumFrame() {
@@ -468,11 +482,12 @@ public final class GameState {
             double dy = (forward * forwardY() + strafe * rightY()) * walkSpeed();
             bumped = false;
             movedThisPass = true;
+            bumpedFace = -1;
             step(dx, dy);
-            // br_BumpWall only counts a collision when the move was a real stride: it needs the
-            // vector length at 120 or more, so brushing a wall while edging along costs nothing.
+            // br_BumpWall wants the move to be a real stride, at 120 units or more, and aimed at
+            // the face rather than along it - see hitWall for the second half of that.
             if (bumped && Math.hypot(dx, dy) >= 120) {
-                hitWall();
+                hitWall(dx, dy);
             }
         }
 
@@ -542,8 +557,54 @@ public final class GameState {
         return inventory.isSpeedBoosted() ? base : heart.walkSpeed(base);
     }
 
-    /** br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult. */
-    private void hitWall() {
+    /**
+     * The angle you have to be walking at, per face, for a bump to count. Each caller of
+     * br_BumpWall hands it {@code sv_LastMove+2} — the direction of the move — less the angle that
+     * would take you straight into that face, plus 62.
+     *
+     * The engine's own figures are 0 for east, 256 for west, 128 for north and 378 for south. The
+     * first two are the other way round here because this port's X axis is mirrored against the
+     * engine's; the south one is straightened from 378 to 384, a six unit skew that is either a
+     * slip or a hand-tuned fudge and is about four degrees either way.
+     */
+    private static final int[] HEAD_ON = new int[4];
+
+    static {
+        HEAD_ON[Level.NORTH_DIR] = 128;
+        HEAD_ON[Level.EAST_DIR] = 256;
+        HEAD_ON[Level.SOUTH_DIR] = 384;
+        HEAD_ON[Level.WEST_DIR] = 0;
+    }
+
+    /** {@code bmi} then {@code cmpi #124,d5}: a window of 124 units, so 62 either side. */
+    private static final int BUMP_WINDOW = 124;
+    private static final int BUMP_BIAS = 62;
+
+    /** The face the last collision pushed off, or -1. */
+    private int bumpedFace = -1;
+
+    private void bump(int dir) {
+        bumped = true;
+        bumpedFace = dir;
+    }
+
+    /**
+     * br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult.
+     *
+     * Only when you actually walk into it. The two tests at the top of the routine throw the hit
+     * away unless the movement is within 62 units of straight on, so brushing a wall as you walk
+     * along it is free — which is most of the contact a player makes, and without this the static
+     * and the insults never stop.
+     */
+    private void hitWall(double dx, double dy) {
+        if (bumpedFace < 0) {
+            return;
+        }
+        int moveDir = angleTowards((int) Math.round(dx), (int) Math.round(dy));
+        int rel = (moveDir - HEAD_ON[bumpedFace] + BUMP_BIAS + 512) & 511;
+        if (rel >= BUMP_WINDOW) {
+            return;
+        }
         inventory.hurt(1);
         log.add(text(TextTable.BUMP_WALL, "ouch"));
         szum();
@@ -674,17 +735,17 @@ public final class GameState {
 
         if (inX < r && !level.isPassable(cx, cy, Level.WEST_DIR)) {
             inX = r;
-            bumped = true;
+            bump(Level.WEST_DIR);
         } else if (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR)) {
             inX = far;
-            bumped = true;
+            bump(Level.EAST_DIR);
         }
         if (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR)) {
             inY = r;
-            bumped = true;
+            bump(Level.SOUTH_DIR);
         } else if (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR)) {
             inY = far;
-            bumped = true;
+            bump(Level.NORTH_DIR);
         }
 
         int col = level.column(cx, cy);

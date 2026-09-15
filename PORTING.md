@@ -148,7 +148,8 @@ Two departures from the original, both deliberate:
 ## Tests
 
 `gradle :core:test` runs headless against the shipped maps: 60 tests covering parsing, movement,
-doors, switches, pickups, line of sight, enemy movement and the animation tables. The one that earns its keep is a
+doors, switches, pickups, line of sight, enemy movement, the animation tables and the
+interference burst. The one that earns its keep is a
 random walk of 20 000 steps across five levels asserting the player never ends up on the far side
 of a shut face. It found both departures listed above.
 
@@ -172,6 +173,7 @@ Done:
 - saving and loading in the original 768 byte Savegame.DAT format
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
 - texture animation: the animated wall, the three animated columns, and the shared enemy walk phase
+- `sv_MAKE_SZUM`, the interference burst when a shot lands or the player walks into a wall
 - front end: the intro animation plays, then a title screen, with death and victory cards
 - the five-slot save menu, reading and writing the original file
 - playable viewer, plus a screenshot path for verification
@@ -180,7 +182,8 @@ Not started:
 
 - the original HUD layout and the briefing screens (`SERVER`)
 - wall decals: blood stains (`dr_AddBlood`) and plaques / card slots (`dr_AddTables`)
-- full-screen effects: `TELEPORT` stretch, `sv_MAKE_SZUM` static, `do_FLASH`, `p_FadeColors`
+- full-screen effects: the `TELEPORT` stretch and `p_FadeColors`
+- the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
 - `DRAW_HEART` / `EXCITE`, `DrawBomb`, `CheckCodes` (cheat codes), the `sv_Death` sequence
 - `ci_DrawWeapon`'s chaos dissolve when the weapon in hand changes
 
@@ -253,6 +256,24 @@ counter on `GameState` and feeds it to all four. `LEVEL01A` alone has 48 animate
 
 The animated wall faces are batched into one mesh with a swappable material rather than one
 geometry each; the columns are already billboards, so they only change material.
+
+## Interference
+
+`sv_MAKE_SZUM` - *szum* is Polish for static - runs for two passes of `MAIN_LOOP` after a shot
+lands on the player (`oc_PlayerHit`) or the player walks into a wall at speed (`br_BumpWall`). It
+picks 81 rows out of the 128 row view, with repetition, by exclusive-oring pairs of words read
+straight out of Amiga ROM, and fills each one across with the byte `$88`.
+
+`$88` is a colour, not a dither pattern. The `ConvBits` macro rolls bit 7 into bitplane 0 and bit
+3 into bitplane 4, so a byte with only those two bits set is index `1 + 16 = 17`, which every
+complex palette holds as the same pale blue `#9999DD`. Solid full-width lines, in other words, so
+the port draws them from a texture one pixel wide stretched across the window.
+
+`oc_PlayerHit` also turns the player by a random `-8..7`, which is ported. The pushes that go with
+both events are not: `br_BumpWall` writes a rebound into `sv_LastMove+4/+6`, and `oc_PlayerHit`
+adds four times the shot's velocity to `sv_AddMove` - which `sv_DoRotIt` then reads back under
+`andi #$ff`, destroying the sign and sending a negative push the wrong way. That one is a bug in
+the original, and reproducing it would only feel broken.
 
 ## Decals, and what is still unclear about them
 

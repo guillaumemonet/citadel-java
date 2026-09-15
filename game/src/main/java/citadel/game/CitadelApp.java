@@ -125,11 +125,16 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         flyCam.setEnabled(false);
         setupInput();
         setupHud();
+        interference = new Interference(assetManager, cam.getWidth(), cam.getHeight());
         automap = new Automap(assetManager, cam.getWidth(), cam.getHeight());
         guiNode.attachChild(automap.picture());
         compass = new Compass(assetManager, cam.getWidth(), cam.getHeight(),
                 automap.side());
         guiNode.attachChild(compass.picture());
+        // the burst goes over the view but under the furniture: sv_MAKE_SZUM paints the chunky
+        // buffer before sv_copy, and COMPASS and UpdateMap run after it
+        raiseOverInterference(automap.picture());
+        raiseOverInterference(compass.picture());
         syncCamera();
 
         screens = new Screens(assetManager, guiNode,
@@ -629,6 +634,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         geometry.syncProjectiles(game);
         automap.update(game);
         compass.update(game);
+        interference.update(guiNode, game.szumActive(), game.szumFrame());
         syncWeaponView(assets, Assets.complexOf(currentMap));
         sound.serve(game);
         syncCamera();
@@ -661,6 +667,14 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     }
 
     // ----------------------------------------------------------------- hud
+
+    /** sv_MAKE_SZUM, the static burst when a shot lands or the player walks into a wall. */
+    private Interference interference;
+
+    private static void raiseOverInterference(com.jme3.scene.Spatial s) {
+        com.jme3.math.Vector3f t = s.getLocalTranslation();
+        s.setLocalTranslation(t.x, t.y, Interference.Z + 0.1f);
+    }
 
     /** Dark band the readout sits on, since white text on a lit ceiling is barely there. */
     private com.jme3.ui.Picture hudPanel;
@@ -721,6 +735,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         hudPanel.setWidth(cam.getWidth());
         hudPanel.setHeight(bandHeight);
         hudPanel.setPosition(0, cam.getHeight() - bandHeight);
+        raiseOverInterference(hudPanel);
         guiNode.attachChild(hudPanel);
 
         hud = new BitmapText(assetManager.loadFont("Interface/Fonts/Default.fnt"));

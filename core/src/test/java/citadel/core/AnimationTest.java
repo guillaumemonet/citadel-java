@@ -124,4 +124,40 @@ class AnimationTest {
             assertTrue(s.species == 0 || s.species == 1);
         }
     }
+
+    @Test
+    @DisplayName("a shot landing on the player starts a two pass interference burst")
+    void szumLastsTwoPasses() throws Exception {
+        GameState game = new GameState(load("LEVEL01A.MAP"));
+        assertFalse(game.szumActive(), "nothing has happened yet");
+
+        game.jolt();
+        assertTrue(game.szumActive(), "sv_SzumTime is not set");
+
+        int first = game.szumFrame();
+        game.update(0f, 0f, 0f, 1f / GameState.DEFAULT_LOOP_HZ);
+        assertTrue(game.szumActive(), "the burst is two passes long, not one");
+        assertNotEquals(first, game.szumFrame(), "the rows must be re-rolled each pass");
+        game.update(0f, 0f, 0f, 1f / GameState.DEFAULT_LOOP_HZ);
+        assertFalse(game.szumActive(), "the burst outstayed sv_SzumTime");
+    }
+
+    @Test
+    @DisplayName("being hit knocks the aim off by up to eight units either way")
+    void joltTurnsThePlayer() throws Exception {
+        GameState game = new GameState(load("LEVEL01A.MAP"));
+        boolean moved = false;
+        for (int i = 0; i < 200; i++) {
+            game.angle = 256;
+            game.jolt();
+            int off = ((game.angle - 256) + 512) % 512;
+            if (off > 255) {
+                off -= 512;
+            }
+            // asr.b #4 on a random byte gives -8..7
+            assertTrue(off >= -8 && off <= 7, "turned by " + off);
+            moved |= off != 0;
+        }
+        assertTrue(moved, "the turn is never applied");
+    }
 }

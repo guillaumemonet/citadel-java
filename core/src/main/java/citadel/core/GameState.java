@@ -122,6 +122,46 @@ public final class GameState {
         return animPhase;
     }
 
+    /**
+     * sv_SzumTime: passes of MAIN_LOOP left showing the interference burst that sv_MAKE_SZUM
+     * paints over the view. Set to 2 when a shot lands on the player (oc_PlayerHit) and when the
+     * player walks into a wall at speed (br_BumpWall).
+     */
+    private int szumTime;
+    /** Changes every pass the burst is drawn, so the renderer re-rolls its rows as the engine does. */
+    private int szumFrame;
+
+    public boolean szumActive() {
+        return szumTime > 0;
+    }
+
+    public int szumFrame() {
+        return szumFrame;
+    }
+
+    /**
+     * Two passes of sv_MAKE_SZUM, which fills 81 randomly chosen rows of the 128 row view with
+     * byte $88 - palette index 17, once the chunky to planar convention is undone.
+     *
+     * Both br_BumpWall and oc_PlayerHit do this. Neither one's push is ported: br_BumpWall stores
+     * a rebound in sv_LastMove+4/+6 and oc_PlayerHit adds to sv_AddMove, which sv_DoRotIt reads
+     * back under {@code andi #$ff}, destroying the sign of a negative push and throwing the player
+     * the wrong way.
+     */
+    void szum() {
+        szumTime = 2;
+    }
+
+    /**
+     * oc_PlayerHit: the static, plus a random turn that knocks the aim off. br_BumpWall has no
+     * equivalent, so walking into a wall does not turn the player.
+     */
+    void jolt() {
+        szum();
+        // GetRandom / asr.b #4,d0 / ext d0 - a signed byte shifted down 4, so -8..7
+        angle = (angle + ((byte) rnd.nextInt(256) >> 4)) & 511;
+    }
+
     public boolean isVisited(int x, int y) {
         return Level.inside(x, y) && visited[x + y * Level.GRID];
     }
@@ -346,6 +386,10 @@ public final class GameState {
         }
 
         animPhase++;
+        if (szumTime > 0) {
+            szumTime--;
+            szumFrame++;
+        }
         serveDoors();
         takeItems();
         markVisited();
@@ -387,6 +431,7 @@ public final class GameState {
     private void hitWall() {
         inventory.hurt(1);
         log.add(text(TextTable.BUMP_WALL, "ouch"));
+        szum();
     }
 
     /**
@@ -1012,6 +1057,7 @@ public final class GameState {
         inventory.hurt(damage);
         playSound(SoundTable.PLAYER_HURT);
         log.add(text(72, "hit for " + damage));
+        jolt();
     }
 
     private Enemy enemyNear(int x, int y, int exceptSlot) {
@@ -1062,6 +1108,7 @@ public final class GameState {
         inventory.hurt(damage);
         playSound(SoundTable.PLAYER_HURT);
         log.add(text(72, "hit for " + damage));
+        jolt();
     }
 
     /** Maps an enemy's weapon number onto the projectile type it fires, as es_EnemyShoot does. */

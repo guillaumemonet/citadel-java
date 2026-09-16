@@ -580,6 +580,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             mapView.detach();
         }
         inputManager.setCursorVisible(next != Mode.PLAYING);
+        mouseSettle = MOUSE_SETTLE;
         boolean inGame = next == Mode.PLAYING;
         setHudVisible(inGame);
     }
@@ -854,8 +855,19 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         }
     }
 
+    /**
+     * Frames to ignore the mouse for after the cursor is hidden. Hiding it warps the pointer to
+     * the middle of the window, and that warp arrives as one enormous relative delta - enough to
+     * drive the pitch straight to its clamp, so the game starts looking at the floor.
+     */
+    private static final int MOUSE_SETTLE = 3;
+    private int mouseSettle;
+
     @Override
     public void onAnalog(String name, float value, float tpf) {
+        if (mode != Mode.PLAYING || mouseSettle > 0) {
+            return;
+        }
         if ("mouseL".equals(name)) {
             mouseTurn -= value * MOUSE_TURN;
         } else if ("mouseR".equals(name)) {
@@ -977,6 +989,9 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         serveTeleport(tpf);
         if (!holdingCamera) {
             syncCamera();
+        }
+        if (mouseSettle > 0) {
+            mouseSettle--;
         }
         lastTpf = tpf;
         updateHud();

@@ -77,6 +77,21 @@ facing, left mouse or `Ctrl` fires, `1`..`6` pick a weapon and `0` goes back to 
 headless. `gradle :core:test` exercises it against the shipped maps, including a random walk of
 20 000 steps across five levels asserting the player never ends up on the far side of a shut door.
 
+## Packaging
+
+```sh
+gradle :game:jpackage              # a self-contained folder in game/build/jpackage/Citadel
+gradle :game:jpackage -Ptype=msi   # a Windows installer, which needs the WiX toolset
+```
+
+The result carries its own Java runtime, the converted assets and the original data, so it runs on
+a machine with nothing installed: about 100 MB, most of it the runtime. Two things keep that from
+being twice the size — `--add-modules` so jlink strips the JDK down to what jME actually uses, and
+dropping the LWJGL natives for every platform except the one being built for.
+
+`jpackage` substitutes `$APPDIR` in the options it bakes in, which is how the game finds its
+assets next to itself rather than relative to wherever it was launched from.
+
 ## Documentation
 
 - **[PORTING.md](PORTING.md)** — coordinate system, movement rules, where the port deliberately

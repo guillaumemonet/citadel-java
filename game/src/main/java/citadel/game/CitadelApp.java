@@ -522,6 +522,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
             try {
                 save.store(slotIndex, game, campaign, campaign.indexOf(currentMap),
                         currentMap.replace(".MAP", ""));
+                save.storeMap(slotIndex, worldMap);
                 save.save(saveFile());
             } catch (Exception e) {
                 System.out.println("cannot save: " + e.getMessage());
@@ -823,6 +824,7 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
         try {
             GameState probe = new GameState(level);
             citadel.core.Campaign.Stage stage = save.restore(slot, probe, campaign);
+            save.restoreMap(slot, worldMap);
             File map = campaign.file(assets.mapsDir(), stage);
             if (map == null) {
                 game.note("missing map " + stage.mapName());

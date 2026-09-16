@@ -147,7 +147,7 @@ Two departures from the original, both deliberate:
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 119 tests covering parsing, movement,
+`gradle :core:test` runs headless against the shipped maps: 120 tests covering parsing, movement,
 doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
 burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
@@ -194,8 +194,6 @@ Done:
 Not started:
 
 - the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
-- the map's progress is not saved yet: which complexes have fallen lives in `WorldMap` for the
-  session rather than in `STRUCTURE+64`
 
 ## Saves
 
@@ -203,6 +201,10 @@ Not started:
 block is the engine's `STRUCTURE`, the record the server keeps at `$7f800` and hands to the game
 between levels. A slot carries a 16 byte name at +72, set to `WOLNE@` — Polish for "free" — when
 empty, with `@` terminating the string as it does in the text files.
+
+MAPA's own fields live in the same block: it marks a complex off with `move.b #1,64(a1,d0.w)`,
+d0 being the complex less one, and counts them up in the word at 98 — the one the centre checks
+for seven. The port writes and reads both, so which complexes have fallen survives a save.
 
 Offsets come from the engine's own load, which reads size, floor, details, energy and Glowica
 individually and then copies **18 words from +14** into `sv_GUNS`: six weapons of (condition,

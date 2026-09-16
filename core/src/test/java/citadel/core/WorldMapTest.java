@@ -123,4 +123,24 @@ class WorldMapTest {
     private static WorldMap.Status statusOfComplex(WorldMap map, int complex) {
         return map.statusOf(target(complex));
     }
+
+    @Test
+    @DisplayName("which complexes have fallen survives a save and a load")
+    void progressIsSaved() {
+        WorldMap map = new WorldMap();
+        map.markDone(2);
+        map.markDone(5);
+
+        SaveGame save = SaveGame.empty();
+        save.storeMap(0, map);
+
+        WorldMap back = new WorldMap();
+        save.restoreMap(0, back);
+        assertTrue(back.isDone(2));
+        assertTrue(back.isDone(5));
+        assertEquals(2, back.complexesTaken());
+        assertSame(WorldMap.Status.EXPLORED, statusOfComplex(back, 2));
+        assertSame(WorldMap.Status.UNEXPLORED, statusOfComplex(back, 3),
+                "and the map opens up the same way it did before");
+    }
 }

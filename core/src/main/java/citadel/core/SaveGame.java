@@ -39,6 +39,14 @@ public final class SaveGame {
     private static final int OFF_LEVEL = 62;
     private static final int OFF_NAME = 72;
     private static final int NAME_LENGTH = 16;
+    /**
+     * MAPA's own fields. It marks a complex off with {@code move.b #1,64(a1,d0.w)} where d0 is the
+     * complex less one, and counts them up in the word at 98 — which is what the centre checks for
+     * seven before it will let you in.
+     */
+    private static final int OFF_DONE = 64;
+    private static final int OFF_TAKEN = 98;
+
     private static final int OFF_TOTAL_KILLED = 90;
 
     /** Ammunition granted per pickup, the middle word of each sv_GUNS entry. */
@@ -160,6 +168,25 @@ public final class SaveGame {
         putWord(b + OFF_COMPLEX, stage.complex);
         putWord(b + OFF_LEVEL, stage.letter - 'A');
         putName(b, name);
+    }
+
+    /** Writes which complexes have fallen into the slot, where MAPA keeps them. */
+    public void storeMap(int slot, WorldMap map) {
+        int b = base(slot);
+        for (int complex = 1; complex <= 8; complex++) {
+            data[b + OFF_DONE + complex - 1] = (byte) (map.isDone(complex) ? 1 : 0);
+        }
+        putWord(b + OFF_TAKEN, map.complexesTaken());
+    }
+
+    /** Reads them back. */
+    public void restoreMap(int slot, WorldMap map) {
+        int b = base(slot);
+        for (int complex = 1; complex <= 8; complex++) {
+            if (data[b + OFF_DONE + complex - 1] != 0) {
+                map.markDone(complex);
+            }
+        }
     }
 
     /** Restores a slot into a fresh game state, returning the campaign stage to load. */

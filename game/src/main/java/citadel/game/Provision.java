@@ -8,7 +8,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.lang.reflect.InvocationTargetException;
 import java.net.HttpURLConnection;
-import java.net.URL;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -169,7 +169,7 @@ final class Provision {
         deleteTree(part.toPath());
         Files.createDirectories(part.toPath());
 
-        HttpURLConnection http = (HttpURLConnection) new URL(SOURCE_URL).openConnection();
+        HttpURLConnection http = (HttpURLConnection) URI.create(SOURCE_URL).toURL().openConnection();
         http.setInstanceFollowRedirects(true);
         http.setConnectTimeout(15000);
         http.setReadTimeout(30000);

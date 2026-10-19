@@ -29,7 +29,8 @@ public final class Assets {
     public Assets(AssetManager assetManager) {
         this.assetManager = assetManager;
         this.assetRoot = resolve("citadel.assets", "build/assets");
-        this.dataRoot = resolve("citadel.data", "Data");
+        // the original data sits in a sibling Amiga-Citadel checkout, not in this repository
+        this.dataRoot = resolve("citadel.data", "../Amiga-Citadel/Data");
         assetManager.registerLocator(assetRoot.getAbsolutePath(), FileLocator.class);
     }
 

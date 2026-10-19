@@ -1,4 +1,4 @@
-| `maps/` | one PNG overview and one text dump per level (walls, items, enemies, events), plus `INDEX.txt` || `gfx/complexN/` | 158 PNGs per complex# Citadel asset converter
+# Citadel asset converter
 
 Converts the original 1995 Amiga data files into formats a jMonkeyEngine port can load: PNG
 textures and sprites, WAV sound effects, and readable dumps of the level data.
@@ -7,8 +7,8 @@ The format readers live in `:core` and have no dependencies at all; this module 
 WAV writing on top.
 
 ```sh
-gradle :tools:convert                                       # Data -> build/assets
-gradle :tools:inspect -Pargs="../Data/GAME/MAPS/LEVEL01A.MAP 24 7"
+gradle :tools:convert                                       # ../Amiga-Citadel/Data -> build/assets
+gradle :tools:inspect -Pargs="../../Amiga-Citadel/Data/GAME/MAPS/LEVEL01A.MAP 24 7"
 ```
 
 `Convert` also takes flags directly: `--gfx`, `--maps`, `--sounds` run one stage only, and `--raw`
@@ -19,14 +19,14 @@ Output:
 
 | path | contents |
 |---|---|
-| `gfx/complexN/` | 146 PNGs per complex (walls, columns, items, objects, blood, both enemy species) plus the palette |
-| `maps/` | one PNG overview and one text dump per level, plus `INDEX.txt` |
+| `gfx/complexN/` | 169 PNGs per complex (walls, columns, items, objects, blood, bombs, both enemy species, the HUD sheets) plus the palette |
+| `maps/` | one PNG overview and one text dump per level (walls, items, enemies, events), plus `INDEX.txt` |
 | `sounds/` | the 25 effects as WAV, at their original Paula rates |
 | `intro/` | the three intro animations as PNG frames, plus 46 loose IFF artwork images |
 | `screens/` | the headerless `.raw`/`.rawb` screens: hangar, map, cover art, death picture, disk prompts |
 | `raw/` | tile atlases, for eyeballing the decode |
 
-Everything below was derived from the assembly sources in this repository and verified against
+Everything below was derived from the original assembly sources and verified against
 the shipped data; where something is still a guess it says so.
 
 ## Palette: `COLS0n.DAT`

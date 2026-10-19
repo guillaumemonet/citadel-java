@@ -3,6 +3,7 @@ plugins {
 }
 
 val jme = "3.9.0-stable"
+val originalData = rootProject.extra["originalData"] as File
 
 dependencies {
     implementation(project(":core"))
@@ -18,7 +19,7 @@ application {
 tasks.withType<JavaExec>().configureEach {
     // Assets converted by :tools:convert, and the original data for the .MAP files.
     systemProperty("citadel.assets", rootProject.file("build/assets").absolutePath)
-    systemProperty("citadel.data", rootProject.file("Data").absolutePath)
+    systemProperty("citadel.data", originalData.absolutePath)
     // gradle :game:run -Ppace=20  to try a different game speed
     (project.findProperty("pace") as String?)?.let { systemProperty("citadel.pace", it) }
 }
@@ -30,8 +31,10 @@ tasks.register<JavaExec>("shot") {
     mainClass.set("citadel.game.CitadelApp")
     classpath = sourceSets["main"].runtimeClasspath
     systemProperty("citadel.assets", rootProject.file("build/assets").absolutePath)
-    systemProperty("citadel.data", rootProject.file("Data").absolutePath)
+    systemProperty("citadel.data", originalData.absolutePath)
     systemProperty("citadel.screenshot", rootProject.file("build/shots").absolutePath + "/")
+    // jME's ScreenshotAppState writes into the folder but never creates it
+    doFirst { rootProject.file("build/shots").mkdirs() }
     (project.findProperty("screen") as String?)?.let { systemProperty("citadel.screen", it) }
     (project.findProperty("walk") as String?)?.let { systemProperty("citadel.walk", it) }
     (project.findProperty("cam") as String?)?.let { systemProperty("citadel.cam", it) }
@@ -83,7 +86,7 @@ val packageInput by tasks.registering(Sync::class) {
         // the map dumps are there to be read by a person, not by the game
         exclude("maps/**")
     }
-    from(rootProject.file("Data")) {
+    from(originalData) {
         into("Data")
     }
 }

@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WeaponChangeTest {
 
     private static WeaponChange load() throws Exception {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         File f = new File(new File(root, "GAME/Store"), "CHAOSTAB.DAT");
         Assumptions.assumeTrue(f.isFile(), "CHAOSTAB.DAT not present");

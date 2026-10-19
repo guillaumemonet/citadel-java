@@ -1,6 +1,7 @@
 package citadel.core;
 
 import java.io.File;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
@@ -25,13 +26,20 @@ class BumpTest {
     private static final int NORTH = 128;
     private static final int EAST = 256;
 
+    /** The first shipped level that has a cell {@link #northWall} accepts; LEVEL01A has none. */
     private static Level level() throws Exception {
-        File dir = new File("../Data/GAME/MAPS").isDirectory()
-                ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
+        File dir = TestData.maps();
         Assumptions.assumeTrue(dir.isDirectory(), "original Data folder not present");
-        File f = new File(dir, "LEVEL01A.MAP");
-        Assumptions.assumeTrue(f.isFile(), "LEVEL01A.MAP not present");
-        return Level.load(f);
+        File[] maps = dir.listFiles((d, n) -> n.toUpperCase().endsWith(".MAP"));
+        Assumptions.assumeTrue(maps != null, "no level maps present");
+        Arrays.sort(maps);
+        for (File f : maps) {
+            Level level = Level.load(f);
+            if (northWall(level) != null) {
+                return level;
+            }
+        }
+        return null;
     }
 
     /**
@@ -77,8 +85,8 @@ class BumpTest {
     @DisplayName("walking into a wall costs energy and sets the static off")
     void walkingIntoAWallCounts() throws Exception {
         Level level = level();
+        Assumptions.assumeTrue(level != null, "no cell walled only to the north on any level");
         int[] cell = northWall(level);
-        Assumptions.assumeTrue(cell != null, "no cell walled only to the north on this level");
 
         GameState game = atWall(level, cell, NORTH);
         int before = game.inventory.energyReading();
@@ -92,8 +100,8 @@ class BumpTest {
     @DisplayName("sliding along the same wall costs nothing at all")
     void slidingAlongItDoesNot() throws Exception {
         Level level = level();
+        Assumptions.assumeTrue(level != null, "no cell walled only to the north on any level");
         int[] cell = northWall(level);
-        Assumptions.assumeTrue(cell != null, "no cell walled only to the north on this level");
 
         GameState game = atWall(level, cell, EAST);
         int before = game.inventory.energyReading();
@@ -109,8 +117,8 @@ class BumpTest {
     @DisplayName("Z turns the burst off, as cc_z does, and the counter keeps running underneath")
     void theZKeyTurnsItOff() throws Exception {
         Level level = level();
+        Assumptions.assumeTrue(level != null, "no cell walled only to the north on any level");
         int[] cell = northWall(level);
-        Assumptions.assumeTrue(cell != null, "no cell walled only to the north on this level");
 
         GameState game = atWall(level, cell, NORTH);
         assertFalse(game.toggleSzum(), "eori #1,cc_RequestTab2 - first press turns it off");

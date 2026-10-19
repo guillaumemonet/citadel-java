@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ScrollLineTest {
 
     private static ScrollLine line() throws Exception {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         File dir = new File(root, "GAME/Gfx_VIR");
         Assumptions.assumeTrue(new File(dir, "FONTS01.FNT").isFile(), "FONTS01.FNT not present");

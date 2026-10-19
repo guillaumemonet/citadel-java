@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RawScreenTest {
 
     private static File intro() {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         File dir = new File(root, "INTRO");
         Assumptions.assumeTrue(dir.isDirectory(), "Data/INTRO not present");

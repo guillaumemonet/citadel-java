@@ -10,16 +10,18 @@ application {
     mainClass.set("citadel.tools.Convert")
 }
 
+val originalData = rootProject.extra["originalData"] as File
+
 // ./gradlew :tools:convert  regenerates build/assets from the original Data folder.
 tasks.register<JavaExec>("convert") {
     group = "citadel"
     description = "Converts the original Amiga data into PNG, WAV and text dumps."
     mainClass.set("citadel.tools.Convert")
     classpath = sourceSets["main"].runtimeClasspath
-    args("../Data", "../build/assets")
+    args(originalData.absolutePath, rootProject.file("build/assets").absolutePath)
 }
 
-// ./gradlew :tools:inspect -Pargs="Data/GAME/MAPS/LEVEL01A.MAP 24 7"
+// ./gradlew :tools:inspect -Pargs="../../Amiga-Citadel/Data/GAME/MAPS/LEVEL01A.MAP 24 7"
 tasks.register<JavaExec>("inspect") {
     group = "citadel"
     description = "Prints the decoded contents of a window of a level's grid."
@@ -28,7 +30,7 @@ tasks.register<JavaExec>("inspect") {
     args((project.findProperty("args") as String? ?: "").split(" ").filter { it.isNotEmpty() })
 }
 
-// ./gradlew :tools:anim -Pargs="../Data/INTRO/ANIM2/start"
+// ./gradlew :tools:anim -Pargs="../../Amiga-Citadel/Data/INTRO/ANIM2/start"
 tasks.register<JavaExec>("anim") {
     group = "citadel"
     description = "Decodes an IFF ANIM intro sequence to PNG frames."

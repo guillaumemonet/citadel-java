@@ -19,16 +19,8 @@ class GameStateTest {
     private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
 
     private static File mapsDir() {
-        File[] candidates = {
-                new File("../Data/GAME/MAPS"),
-                new File("Data/GAME/MAPS"),
-        };
-        for (File f : candidates) {
-            if (f.isDirectory()) {
-                return f;
-            }
-        }
-        return null;
+        File f = TestData.maps();
+        return f.isDirectory() ? f : null;
     }
 
     private static Level load(String name) throws Exception {

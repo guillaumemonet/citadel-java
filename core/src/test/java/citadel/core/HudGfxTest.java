@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HudGfxTest {
 
     private static File gfxDir() {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         File dir = new File(root, "GAME/Gfx_VIR");
         Assumptions.assumeTrue(new File(dir, "WINDOW1.RAW").isFile(), "WINDOW1.RAW not present");

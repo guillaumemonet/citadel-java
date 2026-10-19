@@ -21,8 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AnimationTest {
 
     private static Level load(String name) throws Exception {
-        File dir = new File("../Data/GAME/MAPS").isDirectory()
-                ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
+        File dir = TestData.maps();
         Assumptions.assumeTrue(dir.isDirectory(), "original Data folder not present");
         File f = new File(dir, name);
         Assumptions.assumeTrue(f.isFile(), name + " not present");

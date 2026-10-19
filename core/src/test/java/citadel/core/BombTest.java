@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BombTest {
 
     private static File dataRoot() {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         return root;
     }

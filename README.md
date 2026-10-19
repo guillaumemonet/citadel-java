@@ -2,7 +2,9 @@
 
 A port of the 1995 Amiga game **Citadel** by Virtual Design, rebuilt in Java on
 [jMonkeyEngine](https://jmonkeyengine.org/). The original 68000 assembly sources and game data are
-included in `Code/` and `Data/` and are the reference the port is derived from.
+the reference the port is derived from. They are not part of this repository: check out
+[Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel) next to it, so that its `Code/` and
+`Data/` sit in `../Amiga-Citadel`, or point the build elsewhere with `-Poriginal=<path>`.
 
 The original is a cell-based software renderer: a 64 × 64 grid of 1024-unit cells, walls drawn as
 textured trapezoids back to front from a precomputed visibility table, all integer arithmetic,
@@ -14,7 +16,12 @@ game rules, taken from the assembly rather than reinvented.
 
 ## Running it
 
-Needs a JDK 21 toolchain. Gradle downloads jMonkeyEngine on first build.
+Needs a JDK 21 toolchain and the original data (see above). Gradle downloads jMonkeyEngine on
+first build.
+
+```sh
+git clone https://github.com/pawelmat/Amiga-Citadel ../Amiga-Citadel
+```
 
 ```sh
 gradle :tools:convert     # convert the original data into build/assets

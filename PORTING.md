@@ -1,6 +1,9 @@
 # Porting Citadel to jMonkeyEngine
 
-A Java port of the 1995 Amiga game whose original 68000 sources sit in `Code/` and `Data/`.
+A Java port of the 1995 Amiga game whose original 68000 sources and data are
+in the [Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel) repository, expected as a sibling
+checkout in `../Amiga-Citadel` (or wherever `-Poriginal=<path>` points). Paths such as `Code/` and
+`Data/` below are relative to it.
 
 The original engine is a cell-based software renderer: a 64 x 64 grid of 1024-unit cells, walls
 drawn as textured trapezoids back to front using a precomputed visibility table, all in integer
@@ -21,7 +24,7 @@ Requires a JDK 21 toolchain. `build/` and `tools/out/` are gitignored.
 ## Getting a level on screen
 
 ```sh
-gradle :tools:convert          # Data -> build/assets (PNG, WAV, text dumps)
+gradle :tools:convert          # ../Amiga-Citadel/Data -> build/assets (PNG, WAV, text dumps)
 gradle :game:run               # walk around LEVEL01A
 gradle :game:run --args=LEVEL05B
 ```
@@ -35,7 +38,7 @@ Useful while debugging:
 gradle :game:shot -Plevel=LEVEL03C            # render one frame to build/shots
 gradle :game:shot -Pcam=top                   # top-down, to compare against maps/*.png
 gradle :game:shot -Pscreen=title              # render a front-end screen instead of the world
-gradle :tools:inspect -Pargs="../Data/GAME/MAPS/LEVEL01A.MAP 24 7"
+gradle :tools:inspect -Pargs="../../Amiga-Citadel/Data/GAME/MAPS/LEVEL01A.MAP 24 7"
 ```
 
 ## Formats

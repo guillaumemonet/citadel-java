@@ -111,8 +111,7 @@ class CheatsTest {
     }
 
     private static GameState load() throws Exception {
-        File dir = new File("../Data/GAME/MAPS").isDirectory()
-                ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
+        File dir = TestData.maps();
         Assumptions.assumeTrue(dir.isDirectory(), "original Data folder not present");
         File f = new File(dir, "LEVEL01A.MAP");
         Assumptions.assumeTrue(f.isFile(), "LEVEL01A.MAP not present");

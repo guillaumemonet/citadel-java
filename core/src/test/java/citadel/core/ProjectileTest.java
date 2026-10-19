@@ -16,8 +16,7 @@ class ProjectileTest {
     private static final float TICK = 1f / GameState.DEFAULT_LOOP_HZ;
 
     private static Level load(String name) throws Exception {
-        File dir = new File("../Data/GAME/MAPS").isDirectory()
-                ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
+        File dir = TestData.maps();
         Assumptions.assumeTrue(dir.isDirectory(), "original Data folder not present");
         File f = new File(dir, name);
         Assumptions.assumeTrue(f.isFile(), name + " not present");

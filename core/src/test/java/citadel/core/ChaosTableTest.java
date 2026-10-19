@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ChaosTableTest {
 
     private static ChaosTable load() throws Exception {
-        File root = new File("../Data").isDirectory() ? new File("../Data") : new File("Data");
+        File root = TestData.root();
         Assumptions.assumeTrue(root.isDirectory(), "original Data folder not present");
         File f = new File(new File(root, "GAME/Store"), "CHAOSTAC.DAT");
         Assumptions.assumeTrue(f.isFile(), "CHAOSTAC.DAT not present");

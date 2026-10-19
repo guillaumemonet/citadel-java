@@ -15,8 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SaveGameTest {
 
     private static File dataRoot() {
-        File a = new File("../Data");
-        return a.isDirectory() ? a : new File("Data");
+        return TestData.root();
     }
 
     private static File shippedSave() {

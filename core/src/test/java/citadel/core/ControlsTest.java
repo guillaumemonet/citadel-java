@@ -91,8 +91,7 @@ class ControlsTest {
      */
     @Test
     void enemiesNeverCrossAClosedFace() throws Exception {
-        File dir = new File("../Data/GAME/MAPS").isDirectory()
-                ? new File("../Data/GAME/MAPS") : new File("Data/GAME/MAPS");
+        File dir = TestData.maps();
         Assumptions.assumeTrue(dir.isDirectory(), "original Data folder not present");
 
         for (String name : new String[]{"LEVEL01A.MAP", "LEVEL02C.MAP", "LEVEL05B.MAP"}) {

@@ -73,6 +73,15 @@ public final class CitadelApp extends SimpleApplication implements ActionListene
     }
 
     public static void main(String[] args) {
+        // exit explicitly: once a Swing dialog has been shown, the AWT thread keeps the JVM alive
+        try {
+            if (!Provision.ensure()) {
+                System.exit(0);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
         String want = (args.length > 0) ? args[0] : "LEVEL01A";
         CitadelApp app = new CitadelApp(want);
 

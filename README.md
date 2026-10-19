@@ -91,13 +91,17 @@ gradle :game:jpackage              # a self-contained folder in game/build/jpack
 gradle :game:jpackage -Ptype=msi   # a Windows installer, which needs the WiX toolset
 ```
 
-The result carries its own Java runtime, the converted assets and the original data, so it runs on
-a machine with nothing installed: about 100 MB, most of it the runtime. Two things keep that from
-being twice the size — `--add-modules` so jlink strips the JDK down to what jME actually uses, and
-dropping the LWJGL natives for every platform except the one being built for.
+The result carries its own Java runtime and the game, but no game data: about 80 MB, most of it
+the runtime. Two things keep that from being twice the size — `--add-modules` so jlink strips the
+JDK down to what jME actually uses, and dropping the LWJGL natives for every platform except the
+one being built for.
 
-`jpackage` substitutes `$APPDIR` in the options it bakes in, which is how the game finds its
-assets next to itself rather than relative to wherever it was launched from.
+On first start the game asks whether to download the original data from
+[Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel) (pinned to the commit the port was
+checked against, about 20 MB), or to use a checkout already on disk. It then converts it once, and
+keeps the data, the converted assets and the save file in a per-user folder:
+`%LOCALAPPDATA%\Citadel` on Windows, `~/Library/Application Support/Citadel` on macOS,
+`~/.local/share/citadel` elsewhere. Delete that folder to start over.
 
 ## Documentation
 

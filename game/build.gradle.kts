@@ -7,6 +7,8 @@ val originalData = rootProject.extra["originalData"] as File
 
 dependencies {
     implementation(project(":core"))
+    // the packaged game converts the original data itself on first start
+    implementation(project(":tools"))
     implementation("org.jmonkeyengine:jme3-core:$jme")
     implementation("org.jmonkeyengine:jme3-desktop:$jme")
     implementation("org.jmonkeyengine:jme3-lwjgl3:$jme")
@@ -51,8 +53,8 @@ tasks.register<JavaExec>("shot") {
 // gradle :game:jpackage            a self-contained folder under build/jpackage/Citadel
 // gradle :game:jpackage -Ptype=msi an installer, which needs the WiX toolset on Windows
 //
-// jpackage substitutes $APPDIR in --java-options, so the game finds its assets next to itself
-// rather than relative to whatever directory it was launched from.
+// The package holds no game data. On first start the game offers to download the original data
+// from Amiga-Citadel and converts it into a per-user folder (see citadel.game.Provision).
 
 val appName = "Citadel"
 
@@ -70,24 +72,15 @@ val nativeTag: String = run {
 val stageDir = layout.buildDirectory.dir("jpackage/input")
 val outDir = layout.buildDirectory.dir("jpackage")
 
-/** The jars, the converted assets and the original data, laid out the way jpackage wants them. */
+/** The jars, laid out the way jpackage wants them. */
 val packageInput by tasks.registering(Sync::class) {
     group = "citadel"
     description = "Stages everything jpackage needs into build/jpackage/input."
-    dependsOn(":tools:convert")
     into(stageDir)
     from(tasks.named("jar"))
     // jME pulls LWJGL's natives for every platform it supports; a package is for one of them
     from(configurations.runtimeClasspath) {
         exclude { it.name.contains("-natives-") && !it.name.endsWith("-$nativeTag.jar") }
-    }
-    from(rootProject.file("build/assets")) {
-        into("assets")
-        // the map dumps are there to be read by a person, not by the game
-        exclude("maps/**")
-    }
-    from(originalData) {
-        into("Data")
     }
 }
 
@@ -122,12 +115,12 @@ tasks.register<Exec>("jpackage") {
             "--dest", out.absolutePath,
             "--main-jar", tasks.named<Jar>("jar").get().archiveFileName.get(),
             "--main-class", "citadel.game.CitadelApp",
-            "--java-options", "-Dcitadel.assets=\$APPDIR/assets",
-            "--java-options", "-Dcitadel.data=\$APPDIR/Data",
             "--java-options", "-Xmx1g",
             // without this jlink keeps the whole JDK, which is a hundred megabytes of nothing.
-            // java.desktop is ImageIO and AWT, jdk.unsupported is the sun.misc.Unsafe LWJGL wants
-            "--add-modules", "java.base,java.desktop,java.logging,java.management,jdk.unsupported",
+            // java.desktop is ImageIO, AWT and the first-start dialogs, jdk.unsupported is the
+            // sun.misc.Unsafe LWJGL wants, jdk.crypto.ec the TLS GitHub's download needs
+            "--add-modules",
+            "java.base,java.desktop,java.logging,java.management,jdk.unsupported,jdk.crypto.ec",
         )
         if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
             // LWJGL wants the main thread on macOS

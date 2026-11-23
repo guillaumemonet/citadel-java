@@ -32,6 +32,12 @@ import com.jme3.util.BufferUtils;
  * still on top and eaten away. That is one read of the framebuffer, taken on the frame the
  * teleport lands — before the camera is moved, which is why {@link CitadelApp} holds the camera
  * back for that single frame.
+ *
+ * Leaving a level runs the same routine into nothing: EndLevel first clears the window in the
+ * hidden screen ({@code .Clrscr}, or the window background from {@code sv_WindowSav}), then
+ * calls TELEPORT, so the view breaks up into black before {@code p_FadeColors}. For that the
+ * held frame is eaten away over a black plate instead of the live scene
+ * ({@link #startIntoBlack}).
  */
 public final class Dissolve implements SceneProcessor {
 
@@ -86,6 +92,36 @@ public final class Dissolve implements SceneProcessor {
         vblanks = 0f;
         if (picture.getParent() == null) {
             guiNode.attachChild(picture);
+        }
+    }
+
+    /** A plate over the 3D view and under the held frame, for {@link #startIntoBlack}. */
+    private Picture backdrop;
+
+    /** EndLevel's TELEPORT: the view dissolves into an empty window. */
+    public void startIntoBlack(com.jme3.scene.Node guiNode) {
+        if (!captured) {
+            return;
+        }
+        if (backdrop == null) {
+            backdrop = new Picture("dissolveBackdrop");
+            Image black = new Image(Image.Format.RGBA8, 1, 1,
+                    BufferUtils.createByteBuffer(new byte[]{0, 0, 0, (byte) 0xff}), ColorSpace.sRGB);
+            backdrop.setTexture(assetManager, new Texture2D(black), false);
+            backdrop.setLocalTranslation(0f, 0f, 0f);
+        }
+        backdrop.setWidth(width);
+        backdrop.setHeight(height);
+        if (backdrop.getParent() == null) {
+            guiNode.attachChild(backdrop);
+        }
+        start(guiNode);
+    }
+
+    /** Takes the black plate away again, once the next level is up. */
+    public void clearBackdrop() {
+        if (backdrop != null) {
+            backdrop.removeFromParent();
         }
     }
 

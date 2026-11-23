@@ -53,6 +53,7 @@ public final class Level {
     private final byte[] column = new byte[GRID * GRID];
     private final byte[] corpse = new byte[GRID * GRID];
     private final byte[] item = new byte[GRID * GRID];
+    private final boolean[] itemRaised = new boolean[GRID * GRID];
     private final boolean[] blocked = new boolean[GRID * GRID];
     private final short[] enemyRef = new short[GRID * GRID];
 
@@ -66,11 +67,23 @@ public final class Level {
     public final int spawnFacing;
     public final int exitCellX;
     public final int exitCellY;
+    /**
+     * sv_LevelData+26: when set, OpenCloseDoors plays SOUND2 16 for door 1 instead of 9.
+     */
+    public final boolean doorSound16;
 
     // ------------------------------------------------------------- loading
 
     public static Level load(File f) throws IOException {
         return new Level(MapFile.load(f));
+    }
+
+    /** Where the maps are in the data, as a path prefix. */
+    public static final String MAPS = "GAME/MAPS/";
+
+    /** A map by file name, for instance LEVEL01A.MAP, from GAME/MAPS. */
+    public static Level load(DataSource data, String mapName) throws IOException {
+        return new Level(MapFile.load(mapName, data.read(MAPS + mapName)));
     }
 
     public Level(MapFile map) {
@@ -90,6 +103,7 @@ public final class Level {
                 column[c] = (byte) map.column(x, y);
                 corpse[c] = (byte) map.corpse(x, y);
                 item[c] = (byte) map.item(x, y);
+                itemRaised[c] = map.itemRaised(x, y);
                 blocked[c] = map.blocked(x, y);
                 enemyRef[c] = (short) map.enemy(x, y);
             }
@@ -102,6 +116,7 @@ public final class Level {
         spawnFacing = map.header16(20);
         exitCellX = map.exitX();
         exitCellY = map.exitY();
+        doorSound16 = map.header16(26) != 0;
 
         for (MapFile.Enemy e : map.enemies()) {
             spawns.add(new EnemySpawn(e));
@@ -178,12 +193,49 @@ public final class Level {
         blocked[idx(x, y)] = value;
     }
 
+    /** SET_ITEM: rm_SetItem replaces the low five bits and keeps the height bit. */
     public void setItem(int x, int y, int value) {
-        item[idx(x, y)] = (byte) value;
+        item[idx(x, y)] = (byte) (value & 0x1f);
+    }
+
+    /** Take_Items clears the item and its height bit together ({@code andi.b #$c0}). */
+    public void removeItem(int x, int y) {
+        item[idx(x, y)] = 0;
+        itemRaised[idx(x, y)] = false;
+    }
+
+    public boolean itemRaised(int x, int y) {
+        return itemRaised[idx(x, y)];
+    }
+
+    /** Changes a card slot, as rm_CardUsed does when a card goes in: 1 empty, 2 full. */
+    public void setPlaque(int x, int y, int dir, int value) {
+        plaque[idx(x, y) * 4 + dir] = (byte) (value & 3);
     }
 
     public void setColumn(int x, int y, int value) {
         column[idx(x, y)] = (byte) value;
+    }
+
+    /**
+     * The top three bits of byte 5, 0..7, which dr_checkDEAD draws as column sprite 24 + n:
+     * me_killed writes 32 or 96 (1 and 3), me_burning 64 or 128 (2 and 4).
+     */
+    public void setCorpse(int x, int y, int value) {
+        corpse[idx(x, y)] = (byte) (value & 7);
+    }
+
+    /**
+     * Bits 6..7 of a wall byte, 0..3: EnemyHitServe writes $40 or $80 on the face a killing shot
+     * travels towards and $C0 on the faces either side of it.
+     */
+    public void setBlood(int x, int y, int dir, int value) {
+        blood[idx(x, y) * 4 + dir] = (byte) (value & 3);
+    }
+
+    /** The whole wall byte, blood bits included, as {@code tst.b} sees it. */
+    public int faceByte(int x, int y, int dir) {
+        return wallValue(x, y, dir) | (wallBlood(x, y, dir) << 6);
     }
 
     /** Byte 7 doubles as an occupancy grid: Move_Enemy clears the old cell and writes the new. */
@@ -248,7 +300,8 @@ public final class Level {
         public final int vulnerability;
         public final int weapon;
         public final int energy;
-        public final int aggression;
+        /** me_w3's stand-off; the engine cuts it to 4/5 at the start of an easy level. */
+        public int aggression;
 
         EnemyTemplate(MapFile m, int which) {
             int base = (which == 0) ? 4 : 10;
@@ -324,7 +377,11 @@ public final class Level {
         public final int cellX;
         public final int cellY;
         public final int dir;
-        /** True when this command fires when the button is released rather than pressed. */
+        /**
+         * True for the commands after the {@code -2} word. rm_HandUsed runs the first list when a
+         * switch goes in (44 to 46) and seeks past the {@code -2} for the second when it comes
+         * back out (46 to 44): the second list undoes the first.
+         */
         public final boolean onRelease;
 
         Command(int code, int param, int loc, boolean onRelease) {
@@ -341,7 +398,7 @@ public final class Level {
             return MapFile.COMMANDS[Math.min(code, MapFile.COMMANDS.length - 1)]
                     + " (" + cellX + "," + cellY + ") " + MapFile.DIR_NAMES[dir]
                     + (code >= SET_WALL ? " param=" + param : "")
-                    + (onRelease ? " [on release]" : "");
+                    + (onRelease ? " [switch out]" : "");
         }
     }
 

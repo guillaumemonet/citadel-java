@@ -239,6 +239,10 @@ class GameStateTest {
         assertEquals(opener.dir, game.facingDir(), "the player is not facing the switch");
 
         assertTrue(game.use(), "the switch did not fire");
+        // rm_FixDoor queues it; ServePriorDoor hands it over and it opens like any other
+        for (int i = 0; i < 10; i++) {
+            game.update(0, 0, 0, TICK);
+        }
         assertTrue(level.isPassable(target.cellX, target.cellY, target.dir),
                 "the remote door did not open");
     }

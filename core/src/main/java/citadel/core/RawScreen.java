@@ -38,7 +38,11 @@ public final class RawScreen {
      */
     public static RawScreen load(File f, int width, int planes, int paletteBytes)
             throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f), width, planes, paletteBytes);
+    }
+
+    public static RawScreen load(String f, byte[] raw, int width, int planes, int paletteBytes)
+            throws IOException {
         if (raw.length <= paletteBytes) {
             throw new IOException(f + ": only " + raw.length + " bytes");
         }
@@ -85,6 +89,35 @@ public final class RawScreen {
             }
         }
         return out;
+    }
+
+    /**
+     * ARGB pixels decoded as Extra Half-Brite: six planes without HAM ({@code BPLCON0 $6300},
+     * as SERVER's MAINcopper and MAPAcopper set for the hangar and the map). Only 32 colours are
+     * loaded; a pixel with the sixth plane set shows colour {@code n - 32} at half brightness.
+     */
+    public int[] ehbPixels() {
+        int[] pal = ehbPalette();
+        int[] idx = indices();
+        int[] out = new int[idx.length];
+        for (int i = 0; i < idx.length; i++) {
+            out[i] = pal[idx[i] & 63];
+        }
+        return out;
+    }
+
+    /** The 64 colours an EHB screen shows: the first 32, then each of them halved. */
+    public int[] ehbPalette() {
+        int[] pal = new int[64];
+        for (int i = 0; i < 32; i++) {
+            int v = palette[i];
+            pal[i] = v;
+            int r = ((v >> 20) & 0xf) >> 1;
+            int g = ((v >> 12) & 0xf) >> 1;
+            int b = ((v >> 4) & 0xf) >> 1;
+            pal[i + 32] = 0xff000000 | (r << 20) | (r << 16) | (g << 12) | (g << 8) | (b << 4) | b;
+        }
+        return pal;
     }
 
     /** ARGB pixels, row major, reading the indices straight out of the palette. */

@@ -108,7 +108,9 @@ class WorldMapTest {
         assertEquals(40, line.length(), "KomplexTexts is forty characters");
         assertTrue(line.contains("PRISON"), line);
         assertTrue(line.contains("NO ACCESS"), line);
-        assertTrue(line.startsWith(" COMPLEX:"), line);
+        assertTrue(line.startsWith(" COMPLEX:PRISON"), "ma_CopIt writes at 9: " + line);
+        assertEquals("NO ACCESS", line.substring(28, 37), "and at 28");
+        assertEquals("             CHOSEN PRISON      ", map.chosenLine());
     }
 
     private static int target(int complex) {
@@ -127,15 +129,17 @@ class WorldMapTest {
     @Test
     @DisplayName("which complexes have fallen survives a save and a load")
     void progressIsSaved() {
-        WorldMap map = new WorldMap();
-        map.markDone(2);
-        map.markDone(5);
+        Structure s = Structure.fresh();
+        s.setComplex(2);
+        new WorldMap().enter(s);
+        s.setComplex(5);
+        new WorldMap().enter(s);
 
         SaveGame save = SaveGame.empty();
-        save.storeMap(0, map);
+        save.store(0, s, "TEST", null);
 
         WorldMap back = new WorldMap();
-        save.restoreMap(0, back);
+        back.load(save.slot(0));
         assertTrue(back.isDone(2));
         assertTrue(back.isDone(5));
         assertEquals(2, back.complexesTaken());

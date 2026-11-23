@@ -73,16 +73,25 @@ public final class HudGfx {
         this.font = font;
     }
 
+    /** From a folder holding the three files, such as Data/GAME/Gfx_VIR. */
     public static HudGfx loadFrom(File gfxDir) throws IOException {
-        byte[] w = read(new File(gfxDir, "WINDOW1.RAW"), SCREEN_W / 8 * PLANES * SCREEN_H);
-        byte[] n = read(new File(gfxDir, "NUMBERS.RAW"),
+        return load(DataSource.directory(gfxDir), "");
+    }
+
+    public static HudGfx loadFrom(DataSource data) throws IOException {
+        return load(data, "GAME/Gfx_VIR/");
+    }
+
+    private static HudGfx load(DataSource data, String dir) throws IOException {
+        byte[] w = read(data, dir + "WINDOW1.RAW", SCREEN_W / 8 * PLANES * SCREEN_H);
+        byte[] n = read(data, dir + "NUMBERS.RAW",
                 DIGIT_STRIDE * DIGIT_H + SMALL_DIGIT_STRIDE * SMALL_DIGIT_H);
-        byte[] f = read(new File(gfxDir, "FONTS01.FNT"), GLYPHS * GLYPH_H);
+        byte[] f = read(data, dir + "FONTS01.FNT", GLYPHS * GLYPH_H);
         return new HudGfx(w, n, f);
     }
 
-    private static byte[] read(File f, int want) throws IOException {
-        byte[] raw = Io.readAll(f);
+    private static byte[] read(DataSource data, String f, int want) throws IOException {
+        byte[] raw = data.read(f);
         if (raw.length < want) {
             throw new IOException(f + ": expected " + want + " bytes, got " + raw.length);
         }

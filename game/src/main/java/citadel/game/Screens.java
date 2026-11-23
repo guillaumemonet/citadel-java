@@ -1,39 +1,34 @@
 package citadel.game;
 
-import java.io.File;
-import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.jme3.asset.AssetManager;
-import com.jme3.asset.TextureKey;
 import com.jme3.font.BitmapFont;
 import com.jme3.font.BitmapText;
 import com.jme3.material.RenderState.BlendMode;
 import com.jme3.math.ColorRGBA;
 import com.jme3.scene.Node;
 import com.jme3.scene.Spatial;
-import com.jme3.texture.Texture;
+import com.jme3.texture.Texture2D;
 import com.jme3.ui.Picture;
 import com.jme3.util.BufferUtils;
 
 /**
- * The full-screen screens that bracket play: the intro animation, the title, and the end-of-game
- * cards.
+ * The port's own quick save and load picker, F5 and F9 in play: a list over the hangar picture.
  *
- * All of it comes from converted originals — the IFF ANIMs under Data/INTRO/ANIM2 and the title
- * artwork beside them — so this is presentation only, with no rules attached.
+ * The original only saves from ENDLEVEL_PART and only loads from the hangar's LOAD GAME, both of
+ * which {@link Server} draws as SERVER does; this is an extra and looks like one.
  */
 public final class Screens {
 
     /** Point size of the caption text when it is not being squeezed into the hangar panel. */
     private static final float CAPTION_SIZE = 22f;
 
-    /** Frames of the intro shown per second, roughly the rate the Amiga player ran them at. */
-    private static final float INTRO_FPS = 12f;
-
     private final AssetManager assetManager;
     private final Node gui;
-    private final File assetRoot;
+    private final Assets assets;
     private final int width;
     private final int height;
 
@@ -41,15 +36,14 @@ public final class Screens {
     private final BitmapText caption;
     private boolean showing;
 
-    private List<String> introFrames = new ArrayList<String>();
-    private int introIndex;
-    private float introTimer;
+    /** Textures already made, so a screen shown twice is uploaded once. */
+    private final Map<Assets.Sprite, Texture2D> textures = new IdentityHashMap<Assets.Sprite, Texture2D>();
 
     public Screens(AssetManager assetManager, Node gui, BitmapFont font,
-                   File assetRoot, int width, int height) {
+                   Assets assets, int width, int height) {
         this.assetManager = assetManager;
         this.gui = gui;
-        this.assetRoot = assetRoot;
+        this.assets = assets;
         this.width = width;
         this.height = height;
 
@@ -64,78 +58,6 @@ public final class Screens {
 
     public boolean isShowing() {
         return showing;
-    }
-
-    /** Collects the intro frames, in the order the original plays its three sequences. */
-    public boolean hasIntro() {
-        return !introFrameList().isEmpty();
-    }
-
-    private List<String> introFrameList() {
-        if (!introFrames.isEmpty()) {
-            return introFrames;
-        }
-        for (String anim : new String[]{"start", "kabina", "explozycja"}) {
-            File dir = new File(assetRoot, "intro/" + anim);
-            File[] files = dir.listFiles();
-            if (files == null) {
-                continue;
-            }
-            java.util.Arrays.sort(files);
-            for (File f : files) {
-                if (f.getName().endsWith(".png")) {
-                    introFrames.add("intro/" + anim + "/" + f.getName());
-                }
-            }
-        }
-        return introFrames;
-    }
-
-    public void startIntro() {
-        introFrameList();
-        introIndex = 0;
-        introTimer = 0f;
-        if (introFrames.isEmpty()) {
-            return;
-        }
-        show(introFrames.get(0), "");
-    }
-
-    /** @return true once the intro has run out of frames */
-    public boolean advanceIntro(float tpf) {
-        if (introFrames.isEmpty()) {
-            return true;
-        }
-        introTimer += tpf;
-        while (introTimer >= 1f / INTRO_FPS) {
-            introTimer -= 1f / INTRO_FPS;
-            introIndex++;
-            if (introIndex >= introFrames.size()) {
-                return true;
-            }
-            show(introFrames.get(introIndex), "");
-        }
-        return false;
-    }
-
-    /** The title card, with whatever prompt the caller wants under it. */
-    public void showTitle(String prompt) {
-        show(firstExisting(
-                "intro/art/CITADEL_title_ENG.iff.png",
-                "intro/art/Plansza_Tytulowa.iff.png",
-                "intro/art/Winieta_EngCover.iff.png"), prompt);
-    }
-
-    public void showMessage(String text) {
-        show(null, text);
-    }
-
-    /**
-     * The death card. Store/zabity.rawb is the picture the server shows when you are killed, and
-     * the converter now decodes it; the prompt goes under it.
-     */
-    public void showDeath(String prompt) {
-        show(firstExisting("screens/zabity.png"), prompt);
     }
 
     /**
@@ -160,7 +82,7 @@ public final class Screens {
         }
         sb.append('\n').append(prompt);
         inPanel = true;
-        show(firstExisting("screens/hangar_eng.png", "screens/hangar.png"), sb.toString());
+        show(read(Assets::hangar), sb.toString());
         inPanel = false;
     }
 
@@ -192,13 +114,18 @@ public final class Screens {
         showDim(false);
     }
 
-    private String firstExisting(String... paths) {
-        for (String p : paths) {
-            if (new File(assetRoot, p).isFile()) {
-                return p;
-            }
+    private interface Screen {
+        Assets.Sprite read(Assets assets) throws Exception;
+    }
+
+    /** One of the pictures, or null, which shows the text alone, when it cannot be read. */
+    private Assets.Sprite read(Screen s) {
+        try {
+            return s.read(assets);
+        } catch (Exception e) {
+            System.out.println("cannot read a screen: " + e.getMessage());
+            return null;
         }
-        return null;
     }
 
     /** A flat panel behind text-only screens, so a menu is not read against the level. */
@@ -228,17 +155,13 @@ public final class Screens {
         }
     }
 
-    private void show(String texturePath, String text) {
+    private void show(Assets.Sprite image, String text) {
         showing = true;
-        showDim(texturePath == null && text != null && !text.isEmpty());
-        if (texturePath != null) {
+        showDim(image == null && text != null && !text.isEmpty());
+        if (image != null) {
             try {
-                TextureKey key = new TextureKey(texturePath, true);
-                key.setGenerateMips(false);
-                Texture tex = assetManager.loadTexture(key);
-                tex.setMagFilter(Texture.MagFilter.Nearest);
-                tex.setMinFilter(Texture.MinFilter.NearestNoMipMaps);
-                picture.setTexture(assetManager, (com.jme3.texture.Texture2D) tex, true);
+                Texture2D tex = textures.computeIfAbsent(image, s -> Assets.texture(s, true));
+                picture.setTexture(assetManager, tex, true);
                 picture.getMaterial().getAdditionalRenderState().setBlendMode(BlendMode.Off);
                 if (picture.getParent() == null) {
                     gui.attachChild(picture);

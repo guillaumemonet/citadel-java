@@ -45,7 +45,7 @@ public final class GameState {
      * <em>at least</em> one blank ({@code VBLANK} then {@code dbf sv_Opoznienie}) and then takes as
      * long as the software renderer takes — several frames on real hardware.
      *
-     * So sv_WalkSpeed's 250 units, sv_RotSpeed's 12, a door's five steps and one call to
+     * So sv_WalkSpeed's 250 units, sv_RotSpeed's 12, a door's six or seven steps and one call to
      * Move_Enemy are all *per pass of this loop*. Pacing them off the blank makes the player
      * sprint, the view spin, and the enemies notice and shoot roughly three times too quickly.
      *
@@ -111,12 +111,8 @@ public final class GameState {
      */
     private float secondFrames;
     private boolean playerDead;
-    /** Frames until the low-energy warning beeps again, from do_pikaj's 55 frame reload. */
-    private float beepCountdown;
     /** VBLANK frames owed to the heart monitor; float for the same reason secondFrames is. */
     private float heartFrames;
-    /** True when the last move ran into something hard enough to count, per br_BumpWall. */
-    private boolean bumped;
     /**
      * Texture animation phase, advanced once per pass of MAIN_LOOP by sv_DoAnims. Walls and
      * columns that animate pick their sprite from this.
@@ -125,6 +121,15 @@ public final class GameState {
 
     public int animPhase() {
         return animPhase;
+    }
+
+    /**
+     * sv_WalkState / 2, the enemy walk frame. Each of sv_DoAnims' three sv_DAdo calls runs
+     * {@code addi #2,sv_WalkState / andi #7}, so it gains 6 a pass and goes 0, 6, 4, 2: the walk
+     * cycle runs backwards through the four frames, 0, 3, 2, 1.
+     */
+    public int walkPhase() {
+        return (animPhase * 3) & 3;
     }
 
     /**
@@ -192,8 +197,9 @@ public final class GameState {
     private void apply(Cheats.Cheat cheat) {
         switch (cheat) {
             case ENERGY:
+                // CheckCodes writes sv_Energy alone, so while HOTKIWI is on TEST_COUNTERS sees a
+                // change and puts the old reading back: the cheat does nothing when immortal
                 inventory.energy = -666;
-                lastEnergy = inventory.energy;
                 break;
             case ARSENAL:
                 // chk_Ammo fills every weapon slot, rolls each condition, and sets each card to -6
@@ -207,9 +213,10 @@ public final class GameState {
                 }
                 break;
             case HOP:
-                // a 1024 unit vector along the view, with no collision check at all
-                posX += (int) Math.round(forwardX() * 1024);
-                posY += (int) Math.round(forwardY() * 1024);
+                // sv_Rotate of a 1024 unit vector along the view, with no collision check at all
+                int[] hop = rotate(1024, (256 - angle) & 0x1fe);
+                posX += hop[0];
+                posY += hop[1];
                 break;
             case IMMORTAL:
                 immortal = !immortal;
@@ -229,14 +236,53 @@ public final class GameState {
     }
 
     /**
-     * sv_difficult, which the server's options screen toggles. The engine reads it in exactly one
-     * place: br_BumpWall skips the point of energy when it is set, so easy means walking into
-     * walls is free.
+     * sv_DIFFICULT, which the server's options screen toggles. The engine reads it in five
+     * places: the start of a level ({@link #beginLevel}), Take_Items (+70 on a weapon's
+     * condition), and br_BumpWall, which skips the point of energy, so walking into walls is free.
      */
     private boolean easy;
 
     public void setEasy(boolean on) {
         easy = on;
+        inventory.easy = on;
+    }
+
+    /**
+     * What the engine does with STRUCTURE before the first frame of a level. Call it once, after
+     * the inventory carried from the last level and the difficulty are in place.
+     *
+     * <ul>
+     * <li>energy is capped at a reading of 500, and on easy a reading under 90 is raised to
+     *     90 plus a random 0..63, made even ({@code andi #$0ffe});</li>
+     * <li>cards are cleared: {@code clear cards}, every level starts without them;</li>
+     * <li>on easy, every fourth slot of the enemy table is emptied ({@code .sv_UsunEn}, slots
+     *     0, 4, 8...), and both species' aggression is cut to 4/5.</li>
+     * </ul>
+     */
+    public void beginLevel() {
+        int e = Math.min(inventory.energyReading(), 500);
+        if (easy && e < 90) {
+            e = (90 + rnd.nextInt(64)) & 0x0ffe;
+        }
+        inventory.energy = -e;
+        java.util.Arrays.fill(inventory.cards, 0);
+        inventory.resetLevelState();
+        if (easy) {
+            java.util.Iterator<Enemy> it = enemies.iterator();
+            while (it.hasNext()) {
+                Enemy en = it.next();
+                if (en.slot % 4 == 0 && en.slot < 63 * 4) {
+                    if (level.enemyRef(en.cellX(), en.cellY()) == en.slot) {
+                        level.setEnemyRef(en.cellX(), en.cellY(), 0);
+                    }
+                    bySlot[en.slot] = null;
+                    it.remove();
+                }
+            }
+            for (Level.EnemyTemplate t : level.enemyTemplates) {
+                t.aggression = t.aggression * 4 / 5;
+            }
+        }
     }
 
     public boolean isEasy() {
@@ -260,10 +306,9 @@ public final class GameState {
      * Two passes of sv_MAKE_SZUM, which fills 81 randomly chosen rows of the 128 row view with
      * byte $88 - palette index 17, once the chunky to planar convention is undone.
      *
-     * Both br_BumpWall and oc_PlayerHit do this. Neither one's push is ported: br_BumpWall stores
-     * a rebound in sv_LastMove+4/+6 and oc_PlayerHit adds to sv_AddMove, which sv_DoRotIt reads
-     * back under {@code andi #$ff}, destroying the sign of a negative push and throwing the player
-     * the wrong way.
+     * Both br_BumpWall and oc_PlayerHit do this, and both push the player as well: br_BumpWall
+     * through the rebound in sv_LastMove+4/+6, oc_PlayerHit through sv_AddMove (see
+     * {@link #doMMove}).
      */
     void szum() {
         szumTime = 2;
@@ -277,7 +322,7 @@ public final class GameState {
         szum();
         heart.excite();
         // GetRandom / asr.b #4,d0 / ext d0 - a signed byte shifted down 4, so -8..7
-        angle = (angle + ((byte) rnd.nextInt(256) >> 4)) & 511;
+        angle = (angle + asrByte(random(), 4)) & 0x1fe;
     }
 
     public boolean isVisited(int x, int y) {
@@ -303,7 +348,11 @@ public final class GameState {
         this.posY = level.spawnCellY * Level.CELL_UNITS + Level.CELL_UNITS / 2;
         this.angle = level.spawnFacing & 511;
         for (Level.EnemySpawn spawn : level.enemySpawns()) {
-            enemies.add(new Enemy(spawn));
+            Enemy e = new Enemy(spawn);
+            enemies.add(e);
+            if (e.slot > 0 && e.slot < bySlot.length) {
+                bySlot[e.slot] = e;
+            }
         }
     }
 
@@ -450,6 +499,10 @@ public final class GameState {
     /**
      * Advances the world.
      *
+     * While the automap is up or the game is paused only the vertical blank runs: NewLev3 keeps
+     * the level clock and the low-energy beep going, and MAIN_LOOP is held (ServeMap, or the
+     * {@code tst sv_PAUSE} spin at {@code ml2}).
+     *
      * @param forward -1..1, scaled by the original walk speed
      * @param strafe  -1..1
      * @param turn    -1..1, scaled by the original turn speed
@@ -459,51 +512,151 @@ public final class GameState {
         if (playerDead) {
             return;
         }
+        float frames = dt * FRAMES_PER_SECOND;
         // The vertical blank runs at a fixed 50 Hz whatever the renderer is doing, and that is
         // where the level clock and the low-energy beep live.
-        serveCounters(dt * FRAMES_PER_SECOND);
+        serveVblank(frames);
+        if (mapOn) {
+            return;                         // ServeMap waits in sm_Wait until the map goes
+        }
+        if (paused) {
+            // ml2: MAIN_LOOP spins one VBLANK a turn, and every 750 of them says so again
+            pauseFrames -= frames;
+            while (pauseFrames <= 0f) {
+                pauseFrames += 750f;
+                log.add(text(TextTable.PAUSED, "... GAME IS PAUSED ..."));
+            }
+            return;
+        }
+        testCounters();
+        if (playerDead) {
+            return;
+        }
 
         // Everything else is paced by MAIN_LOOP, which is a different clock entirely.
         loopAccumulator += dt * loopHz;
         int ticks = Math.min(MAX_CATCHUP, (int) loopAccumulator);
         loopAccumulator -= ticks;
-        for (int i = 0; i < ticks; i++) {
+        for (int i = 0; i < ticks && !playerDead; i++) {
             stepLoop(forward, strafe, turn);
         }
     }
 
+    // ---------------------------------------------------------------- pause
+
+    /** sv_Pause. P toggles it; ServeMap toggles it on the way in and again on the way out. */
+    private boolean paused;
+    /** sv_Pause+2: VBLANKs to the next SCROLL 41, reloaded with 750. */
+    private float pauseFrames = 750f;
+    /** sv_MapOn, which M and TAB toggle. */
+    private boolean mapOn;
+
     /**
-     * One pass of MAIN_LOOP. Every distance and rate the engine holds — sv_WalkSpeed's 250,
-     * sv_RotSpeed's 12, a door's five steps, one call to Move_Enemy — is expressed per pass of
-     * this loop, not per video frame.
+     * cc_p: P flips sv_Pause, with SCROLL 37 going in (and 750 VBLANKs to the first SCROLL 41)
+     * and SCROLL 38 coming out. Ignored while the map is up ({@code cc_IsMap} swallows every key
+     * but the map's own).
+     *
+     * @return true when the game is now paused
+     */
+    public boolean togglePause() {
+        if (mapOn || playerDead) {
+            return paused;
+        }
+        paused = !paused;
+        if (paused) {
+            log.add(text(37, "... GAME PAUSED ..."));
+            pauseFrames = 750f;
+        } else {
+            log.add(text(38, "THE FIGHT GOES ON!"));
+        }
+        return paused;
+    }
+
+    /**
+     * cc_m: M or TAB flips sv_MapOn, and works paused or not. MAIN_LOOP then hands over to
+     * ServeMap, which flips sv_Pause for as long as the map is shown — so it stops the game,
+     * the heart included, and a game paused with P runs its heart during the map and is paused
+     * again after — and prints SCROLL 74 with the player's square written into it (SetLocation).
+     *
+     * @return true when the map is now up
+     */
+    public boolean toggleMap() {
+        if (playerDead) {
+            return mapOn;
+        }
+        mapOn = !mapOn;
+        paused = !paused;
+        if (mapOn) {
+            log.add(location());
+        }
+        return mapOn;
+    }
+
+    /** SetLocation: the square's X and Y, two digits each, at characters 15 and 18 of text 74. */
+    private String location() {
+        String s = text(74, "YOUR LOCATION: 00-00");
+        if (s.length() < 20) {
+            return s;
+        }
+        char[] c = s.toCharArray();
+        int x = cellX(), y = cellY();
+        c[15] = (char) ('0' + x / 10);
+        c[16] = (char) ('0' + x % 10);
+        c[18] = (char) ('0' + y / 10);
+        c[19] = (char) ('0' + y % 10);
+        return new String(c);
+    }
+
+    /** sv_Pause as the engine holds it: note that it reads false while a P pause is under the map. */
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public boolean isMapOn() {
+        return mapOn;
+    }
+
+    /** True while MAIN_LOOP is held, by the map or by P: nothing but the level clock moves. */
+    public boolean isHalted() {
+        return mapOn || paused;
+    }
+
+    /**
+     * One pass of MAIN_LOOP, in its order: the speed potion's countdown, sv_joystick
+     * (sv_DoMMove), sv_Border, OpenCloseDoors, Take_Items, Move_Enemy, Check_RMB,
+     * ServePriorDoor, then after the frame is drawn sv_DoAnims, the objects and UpdateMap.
+     *
+     * Every distance and rate the engine holds — sv_WalkSpeed's 250, sv_RotSpeed's 12, a door's
+     * six or seven steps, one call to Move_Enemy — is expressed per pass of this loop, not per
+     * video frame.
      */
     private void stepLoop(float forward, float strafe, float turn) {
+        // sv_BlitUoK: tst sv_WalkSpeed+6 / subi #1 / bne / move sv_WalkSpeed+4,sv_WalkSpeed+2
+        inventory.tickSpeed();
+
         movedThisPass = false;   // sv_joystick clears sv_Flag+2, sv_DoMMove sets it again if moved
         if (turn != 0f) {
             // A rising angle sweeps west, north, east, south, which is clockwise seen from above,
             // so turning right must *increase* it. Subtracting here mirrored every control.
-            angle = (angle + Math.round(turn * ROT_SPEED)) & 511;
+            // add d7,sv_angle / andi #$1fe: the angle is always even.
+            angle = (angle + Math.round(turn * ROT_SPEED)) & 0x1fe;
         }
-
-        if (forward != 0f || strafe != 0f) {
-            // The original moves along a single vector whose length is capped by sv_WalkSpeed, so
-            // clamp the combined input rather than letting a diagonal run 41% faster.
-            float mag = (float) Math.sqrt(forward * forward + strafe * strafe);
-            if (mag > 1f) {
-                forward /= mag;
-                strafe /= mag;
-            }
-            double dx = (forward * forwardX() + strafe * rightX()) * walkSpeed();
-            double dy = (forward * forwardY() + strafe * rightY()) * walkSpeed();
-            bumped = false;
-            movedThisPass = true;
-            bumpedFace = -1;
-            step(dx, dy);
-            // br_BumpWall wants the move to be a real stride, at 120 units or more, and aimed at
-            // the face rather than along it - see hitWall for the second half of that.
-            if (bumped && Math.hypot(dx, dy) >= 120) {
-                hitWall(dx, dy);
-            }
+        doMMove(forward, strafe);
+        border();
+        openCloseDoors();
+        takeItems();
+        testCounters();
+        moveEnemies();
+        // Check_RMB runs once per MAIN_LOOP pass, after Move_Enemy; the machinegun fires on
+        // every pass the button is held
+        if (triggerHeld && inventory.current == MACHINEGUN_SLOT) {
+            fire();
+        }
+        servePriorDoor(doors[0]);
+        servePriorDoor(doors[1]);
+        // subi #1,sv_Flag+8 / bpl / move #0: the launcher's reload, after Check_RMB
+        if (launcherReload > 0) {
+            launcherReload--;
         }
 
         animPhase++;
@@ -511,56 +664,81 @@ public final class GameState {
             szumTime--;
             szumFrame++;
         }
-        serveDoors();
-        takeItems();
-        markVisited();
-        checkExit();
-        inventory.tick();
-        moveEnemies();
         updateProjectiles();
+        markVisited();
     }
 
+    private static final int MACHINEGUN_SLOT = 3;
+    private boolean triggerHeld;
+
+    /** The fire button's state, for the machinegun's automatic fire. */
+    public void holdTrigger(boolean held) {
+        triggerHeld = held;
+    }
+
+    /** do_pikaj+2: VBLANKs to the next low-energy beep. Starts at 50 and is never reset. */
+    private float beepCountdown = 50f;
+
     /**
-     * Test_Counters and the second-tick in NewLev3: run the level clock, watch for the player
-     * running out of energy, and beep while it is low.
+     * NewLev3, once per VBLANK: the level clock, Draw_Heart (skipped while sv_Pause is set) and
+     * do_pikaj's beep.
+     *
+     * The beep's countdown is only reloaded when it expires, never when the warning starts or
+     * stops, so the first beep waits out whatever was left of it: 50 frames the first time.
      */
-    private void serveCounters(float frames) {
+    private void serveVblank(float frames) {
         secondFrames += frames;
         while (secondFrames >= FRAMES_PER_SECOND) {
             secondFrames -= FRAMES_PER_SECOND;
             levelSeconds++;
         }
 
-        // NewLev3 calls Draw_Heart every VBLANK, and that is where regeneration happens
-        heartFrames += frames;
-        while (heartFrames >= 1f) {
-            heartFrames -= 1f;
-            heart.tick(movedThisPass);
+        if (!paused) {
+            // NewLev3 calls Draw_Heart every VBLANK, and that is where regeneration happens
+            heartFrames += frames;
+            while (heartFrames >= 1f) {
+                heartFrames -= 1f;
+                heart.tick(movedThisPass);
+            }
         }
 
-        // TEST_COUNTERS: while sv_NieUmieraj is set, any change to the reading is put back
-        if (lastEnergy != Integer.MIN_VALUE && immortal && inventory.energy != lastEnergy) {
-            inventory.energy = lastEnergy;
-        } else {
+        if (beeping) {
+            beepCountdown -= frames;
+            while (beepCountdown <= 0f) {
+                beepCountdown += 55f;
+                playSound(SoundTable.BEEP);
+            }
+        }
+    }
+
+    /** do_pikaj, which TEST_COUNTERS sets below 10 energy and clears otherwise. */
+    private boolean beeping;
+
+    /**
+     * TEST_COUNTERS, which MAIN_LOOP calls once a pass: watch for the player running out of
+     * energy, and start or stop the beep. While sv_NieUmieraj is set any change to the reading
+     * is put back, and the beep is left as it was.
+     */
+    private void testCounters() {
+        if (lastEnergy == Integer.MIN_VALUE) {
             lastEnergy = inventory.energy;
+        } else if (inventory.energy == lastEnergy) {
+            return;                                   // beq.s .tc_EnOK
+        } else if (immortal) {
+            inventory.energy = lastEnergy;
+            return;
         }
-
+        lastEnergy = inventory.energy;
         if (!inventory.isAlive()) {
+            inventory.energy = 0;
             playerDead = true;
+            beeping = false;
             heart.setFlatline(true);
             log.add(text(39, "you are dead"));
             playSound(SoundTable.PLAYER_HURT);
             return;
         }
-        if (isEnergyCritical()) {
-            beepCountdown -= frames;
-            if (beepCountdown <= 0) {
-                beepCountdown = 55;
-                playSound(SoundTable.BEEP);
-            }
-        } else {
-            beepCountdown = 0;
-        }
+        beeping = isEnergyCritical();
     }
 
     /**
@@ -572,145 +750,119 @@ public final class GameState {
         return inventory.isSpeedBoosted() ? base : heart.walkSpeed(base);
     }
 
+    // ---------------------------------------------------------------- moving
+
+    /** sv_LastMove: the length of this pass's move as sv_DoMMove saved it, before any rebound. */
+    private int lastMoveLen;
+    /** sv_LastMove+2: its direction, as handed to sv_rotate ({@code 256 - angle} plus a turn). */
+    private int lastMoveDir;
+    /** sv_LastMove+4: the rebound length br_BumpWall and the point-blank shots leave behind. */
+    private int reboundLen;
+    /** sv_LastMove+6: the rebound's direction, in the same terms as {@link #lastMoveDir}. */
+    private int reboundDir;
+    /** sv_AddMove: the shove from a shot (oc_PlayerHit) or an enemy (me_PLAYER). */
+    private int addMoveX;
+    private int addMoveY;
+    /** sv_LastPos: where the player stood before this pass's move. */
+    private int lastPosX;
+    private int lastPosY;
+
     /**
-     * The angle you have to be walking at, per face, for a bump to count. Each caller of
-     * br_BumpWall hands it {@code sv_LastMove+2} — the direction of the move — less the angle that
-     * would take you straight into that face, plus 62.
+     * sv_joystick's d3 as {@code .sv_KORYGUJ} turns it into a change of direction. Forward is 0;
+     * the keys give 256 back, -128 right, 128 left, 64 forward-left, -64 forward-right, 192 and
+     * 320 back-left and back-right. With nothing pressed sv_MouseMove still calls sv_DoMMove,
+     * with no length and d3 = 1, i.e. backwards, which is the way a drunk player drifts.
+     */
+    static int moveTurn(float forward, float strafe) {
+        int f = Float.compare(forward, 0f);
+        int s = Float.compare(strafe, 0f);
+        if (f > 0) {
+            return s < 0 ? 64 : s > 0 ? -64 : 0;
+        }
+        if (f < 0) {
+            return s < 0 ? 256 - 64 : s > 0 ? 256 + 64 : 256;
+        }
+        return s > 0 ? -128 : s < 0 ? 128 : 256;
+    }
+
+    /**
+     * sv_DoMMove. The keys give one vector of sv_WalkSpeed along the view turned by
+     * {@link #moveTurn}, so a diagonal is as fast as a straight line. Then, in order:
      *
-     * The engine's own figures are 0 for east, 256 for west, 128 for north and 378 for south. The
-     * first two are the other way round here because this port's X axis is mirrored against the
-     * engine's; the south one is straightened from 378 to 384, a six unit skew that is either a
-     * slip or a hand-tuned fudge and is about four degrees either way.
+     * <ul>
+     * <li>vodka: while sv_Vodka runs, two random seven-bit signed numbers (-64..63) are added
+     *     to the sideways and the length components, and the second, {@code asr #3}, skews the
+     *     direction by it and turns the view back by as much;</li>
+     * <li>sv_LastMove takes the length and direction;</li>
+     * <li>a rebound (sv_LastMove+4) loses 60 a pass and, while it stays at or above 0, replaces
+     *     the move altogether: 250 into a wall comes back as 190, 130, 70 and 10;</li>
+     * <li>sv_LastPos takes the position, and sv_AddMove, when its X word is not zero, replaces
+     *     the move — under {@code andi #$ff}, so each component lands in 0..255 and a negative
+     *     shove goes the wrong way. That is the original's arithmetic and it is kept.</li>
+     * </ul>
      */
-    private static final int[] HEAD_ON = new int[4];
-
-    static {
-        HEAD_ON[Level.NORTH_DIR] = 128;
-        HEAD_ON[Level.EAST_DIR] = 256;
-        HEAD_ON[Level.SOUTH_DIR] = 384;
-        HEAD_ON[Level.WEST_DIR] = 0;
-    }
-
-    /** {@code bmi} then {@code cmpi #124,d5}: a window of 124 units, so 62 either side. */
-    private static final int BUMP_WINDOW = 124;
-    private static final int BUMP_BIAS = 62;
-
-    /** The face the last collision pushed off, or -1. */
-    private int bumpedFace = -1;
-
-    private void bump(int dir) {
-        bumped = true;
-        bumpedFace = dir;
-    }
-
-    /**
-     * br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult.
-     *
-     * Only when you actually walk into it. The two tests at the top of the routine throw the hit
-     * away unless the movement is within 62 units of straight on, so brushing a wall as you walk
-     * along it is free — which is most of the contact a player makes, and without this the static
-     * and the insults never stop.
-     */
-    private void hitWall(double dx, double dy) {
-        if (bumpedFace < 0) {
-            return;
+    private void doMMove(float forward, float strafe) {
+        int d1 = 0;
+        if (forward != 0f || strafe != 0f) {
+            float mag = Math.min(1f, Math.max(Math.abs(forward), Math.abs(strafe)));
+            d1 = Math.round(walkSpeed() * mag);
         }
-        int moveDir = angleTowards((int) Math.round(dx), (int) Math.round(dy));
-        int rel = (moveDir - HEAD_ON[bumpedFace] + BUMP_BIAS + 512) & 511;
-        if (rel >= BUMP_WINDOW) {
-            return;
+        if (d1 != 0) {
+            movedThisPass = true;               // move #1,sv_Flag+2
         }
-        // tst sv_difficult / bne .NieOd: no energy lost on the easy setting
-        if (!easy) {
-            inventory.hurt(1);
+        int d6 = (256 - angle + moveTurn(forward, strafe)) & 0x1fe;
+        int d0 = 0;
+        if (inventory.vodka > 0) {
+            inventory.vodka--;
+            d0 += vodkaJitter();
+            int d4 = vodkaJitter();
+            d1 += d4;
+            d4 >>= 3;                           // asr #3,d4
+            d6 = (d6 + d4) & 0x1fe;
+            angle = (angle - d4) & 0x1fe;
         }
-        log.add(text(TextTable.BUMP_WALL, "ouch"));
-        szum();
-        heart.excite();
-    }
-
-    /**
-     * UpdateMap: mark the cell underfoot, then every neighbour the player can see into, meaning
-     * those with no wall between. That is why the automap fills in ahead of you down a corridor.
-     */
-    private void markVisited() {
-        int cx = cellX(), cy = cellY();
-        visited[cx + cy * Level.GRID] = true;
-        for (int d = 0; d < 4; d++) {
-            if (level.hasWall(cx, cy, d)) {
-                continue;
+        lastMoveLen = d1;
+        lastMoveDir = d6;
+        if (reboundLen != 0) {
+            reboundLen -= 60;
+            if (reboundLen < 0) {
+                reboundLen = 0;
+            } else {
+                d1 = reboundLen;
+                d6 = reboundDir;
             }
-            int nx = cx + Level.DX[d], ny = cy + Level.DY[d];
-            if (Level.inside(nx, ny)) {
-                visited[nx + ny * Level.GRID] = true;
-            }
         }
+        int[] v = rotate(d0, d1, d6);
+        lastPosX = posX;
+        lastPosY = posY;
+        if (addMoveX != 0) {
+            v[0] = addMoveX & 0xff;
+            v[1] = addMoveY & 0xff;
+        }
+        int fromX = cellX(), fromY = cellY();
+        posX = clampCoord(posX + v[0]);
+        posY = clampCoord(posY + v[1]);
+        addMoveX = 0;
+        addMoveY = 0;
+        blockCrossing(fromX, fromY);
     }
 
     /**
-     * Take_Items: an item is collected when the player is inside a 220 unit box around the centre
-     * of its cell. The engine clears only the low six bits, keeping the block flag.
+     * One of the two ROM bytes a drunk step reads, {@code andi.b #127 / lsl.b / asr.b}: the low
+     * seven bits as a signed number, -64..63.
      */
-    private void takeItems() {
-        int cx = cellX(), cy = cellY();
-        int item = level.item(cx, cy);
-        if (item == 0) {
-            return;
-        }
-        int inX = posX % Level.CELL_UNITS;
-        int inY = posY % Level.CELL_UNITS;
-        if (inX < 512 - 220 || inX > 512 + 220 || inY < 512 - 220 || inY > 512 + 220) {
-            return;
-        }
-        String what = inventory.take(item);
-        if (what == null) {
-            return;
-        }
-        playSound(item >= Inventory.FIRST_AMMO && item < Inventory.FIRST_CARD
-                ? SoundTable.TAKE_AMMO
-                : item >= Inventory.MEDIKIT && item <= Inventory.VODKA
-                        ? SoundTable.TAKE_AID : SoundTable.TAKE_ITEM);
-        level.setItem(cx, cy, 0);
-        geometryDirty = true;
-        // Take_Items computes its SCROLL1 index as base + offset, and every branch works out to
-        // the item value itself: weapons 2 + (v-2), ammunition 8 + (v-8), cards 14 + (v-14), and
-        // the rest are literal SCROLLs at 17, 18 and 19.
-        //
-        // A warhead section is the exception. ti_Head falls through without a SCROLL of its own;
-        // DrawBomb prints it, at 77 plus the stage, so the six sections each get their own line
-        // from "FOUND THE FIRST PART OF THE BOMB!" to "YOU FOUND THE LAST PART OF THE BOMB!!!".
-        if (item == Inventory.WARHEAD) {
-            int stage = BombGfx.stageFor(inventory.warhead);
-            log.add(text(BOMB_TEXT + Math.max(0, stage), what));
-        } else {
-            log.add(text(item, what));
-        }
+    private int vodkaJitter() {
+        return ((random() & 127) << 25) >> 25;
     }
 
     /**
-     * Applies a movement, split so no single sub-step can cross more than one cell boundary.
-     * The original never needs this because it moves at most 250 units per frame against a
-     * 307 unit radius, but a variable frame rate can ask for much more.
-     */
-    private void step(double dx, double dy) {
-        double len = Math.max(Math.abs(dx), Math.abs(dy));
-        int steps = Math.max(1, (int) Math.ceil(len / 200.0));
-        for (int i = 0; i < steps; i++) {
-            int fromX = cellX(), fromY = cellY();
-            posX = clampCoord(posX + (int) Math.round(dx / steps));
-            posY = clampCoord(posY + (int) Math.round(dy / steps));
-            blockCrossing(fromX, fromY);
-            collide();
-        }
-    }
-
-    /**
-     * Keeps the player inside the cell the sub-step started in whenever the face they would cross
-     * is shut.
+     * Keeps the player inside the cell the move started in whenever the face crossed is shut.
      *
-     * The original gets this for free: it moves at most 250 units per frame against a 307 unit
-     * clamp, so it can never reach a boundary that is closed. It can still be straddling a doorway
-     * when that door shuts, though, and then the next step slips through before the clamp applies.
+     * The original has no such test, and mostly needs none: a sober move is at most 250 units
+     * (300 with the potion) against a 307 unit clamp, and sv_AddMove only pushes towards +X and
+     * +Y, at most 255 from a clamp at 717. A drunk one can reach 313, though, which takes a
+     * player clamped against a wall 6 units through it, and sv_Border then clamps them on the
+     * far side. The port refuses that crossing.
      */
     private void blockCrossing(int fromX, int fromY) {
         int toX = cellX();
@@ -737,96 +889,309 @@ public final class GameState {
 
     // ------------------------------------------------------------ collision
 
+    /** {@code 1024-min_distance+60}: the in-cell coordinate beyond which a north or east face is near. */
+    private static final int FAR = Level.CELL_UNITS - PLAYER_RADIUS;
+
     /**
-     * Reimplements sv_Border: clamp the in-cell position away from any face that is not passable,
-     * then push out of a blocking column, then fix up the diagonals.
+     * sv_Border, in its order:
      *
-     * Clamping after the fact is what gives the original its sliding-along-walls feel, so it is
-     * reproduced rather than replaced with a swept test.
+     * <ol>
+     * <li>the exit square ends the level;</li>
+     * <li>br_Chk_OPEN, for each door channel not taken by a priority door;</li>
+     * <li>the four faces: within 307 of a face that br_ChkDoors does not pass, clamp to 307 and
+     *     call br_BumpWall. X first (west, else east), then Y (south, else north);</li>
+     * <li>br2_COLUMN: the enemy whose number is in the cell's byte 7, if within 300 units on
+     *     both axes, puts the player back where this pass began, and costs a point of energy
+     *     if it is burning;</li>
+     * <li>.br2_COLUMN2: a blocking column's box, or a teleport pad;</li>
+     * <li>br2_UP / br2_DOWN: the corners;</li>
+     * <li>br2_END: the in-cell position is written back, and kept for the next pass's column
+     *     test.</li>
+     * </ol>
+     *
+     * Clamping after the fact is what gives the original its sliding-along-walls feel.
      */
-    private void collide() {
+    private void border() {
         int cx = cellX(), cy = cellY();
-        int inX = posX % Level.CELL_UNITS;
-        int inY = posY % Level.CELL_UNITS;
-        final int r = PLAYER_RADIUS;
-        final int far = Level.CELL_UNITS - r;
-
-        if (inX < r && !level.isPassable(cx, cy, Level.WEST_DIR)) {
-            inX = r;
-            bump(Level.WEST_DIR);
-        } else if (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR)) {
-            inX = far;
-            bump(Level.EAST_DIR);
+        int inX = posX & 1023;
+        int inY = posY & 1023;
+        if (cx == level.exitCellX && cy == level.exitCellY && !levelComplete) {
+            levelComplete = true;
+            log.add("level complete");
         }
-        if (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR)) {
-            inY = r;
-            bump(Level.SOUTH_DIR);
-        } else if (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR)) {
-            inY = far;
-            bump(Level.NORTH_DIR);
-        }
-
-        int col = level.column(cx, cy);
-        if (col != 0 && insideColumnBox(inX, inY)) {
-            if (col == COLUMN_TELEPORT) {
-                if (teleportFrom(cx, cy)) {
-                    return;
-                }
-            } else if (blockingColumn(col)) {
-                // Push back along whichever axis the player came from, as br2_c1..c3 do.
-                if (lastInX < 512 - 209) {
-                    inX = 512 - COLUMN_PUSH;
-                } else if (lastInX > 512 + 209) {
-                    inX = 512 + COLUMN_PUSH;
-                } else if (lastInY < 512 - 209) {
-                    inY = 512 - COLUMN_PUSH;
-                } else if (lastInY > 512 + 209) {
-                    inY = 512 + COLUMN_PUSH;
-                }
+        // tst sv_DoorFlag1+22 / bne br_PriorD1: a channel serving a priority door is left alone
+        for (DoorSlot slot : doors) {
+            if (!slot.prior) {
+                checkOpen(slot, cx, cy);
             }
         }
 
-        inX = fixDiagonal(cx, cy, inX, inY, true);
-        inY = fixDiagonal(cx, cy, inX, inY, false);
+        final int r = PLAYER_RADIUS;
+        if (inX < r) {
+            if (!level.isPassable(cx, cy, Level.WEST_DIR)) {
+                inX = r;
+                // move #512,d4 / subi #256-62,d5: unmasked, so bmi throws a negative away
+                bumpWall(lastMoveDir - (256 - 62), 512, level.faceByte(cx, cy, Level.WEST_DIR));
+            }
+        } else if (inX >= FAR && !level.isPassable(cx, cy, Level.EAST_DIR)) {
+            inX = FAR;
+            bumpWall((lastMoveDir + 62) & 0x1fe, 0, level.faceByte(cx, cy, Level.EAST_DIR));
+        }
+        if (inY < r) {
+            if (!level.isPassable(cx, cy, Level.SOUTH_DIR)) {
+                inY = r;
+                bumpWall(lastMoveDir - (378 - 62), 378 + 378,
+                        level.faceByte(cx, cy, Level.SOUTH_DIR));
+            }
+        } else if (inY >= FAR && !level.isPassable(cx, cy, Level.NORTH_DIR)) {
+            inY = FAR;
+            bumpWall(lastMoveDir - (128 - 62), 256, level.faceByte(cx, cy, Level.NORTH_DIR));
+        }
 
-        posX = cx * Level.CELL_UNITS + inX;
-        posY = cy * Level.CELL_UNITS + inY;
+        if (enemyInTheWay(cx, cy)) {
+            return;
+        }
+
+        // .br2_COLUMN2: andi #31 on byte 5, then columns 1, 2 and 4, and 18, the barrel
+        int col = level.column(cx, cy) & 31;
+        boolean inBox;
+        if (col == 18) {
+            // beq.s .br2p lands on the bmi meant for the low X test with the flags of the cmpi,
+            // which are never minus: the barrel's box runs to the west edge of the cell
+            inBox = inX < 512 + COLUMN_HALF
+                    && inY >= 512 - COLUMN_HALF && inY < 512 + COLUMN_HALF;
+        } else if (col != 0 && col < 5 && col != 3) {
+            inBox = inX >= 512 - COLUMN_HALF && inX < 512 + COLUMN_HALF
+                    && inY >= 512 - COLUMN_HALF && inY < 512 + COLUMN_HALF;
+        } else {
+            inBox = false;
+        }
+        if (inBox) {
+            if (col == COLUMN_TELEPORT) {
+                // br_FindTeleport; an inactive pad goes straight to br2_END
+                if (!teleportFrom(cx, cy)) {
+                    finishBorder(inX, inY);
+                }
+                return;
+            }
+            // br2_c1..c3: back out along whichever axes the last pass's position was outside
+            // the box on. Both axes are tested; the X branch falls into the Y one.
+            if (lastInX < 512 - 209) {
+                inX = 512 - COLUMN_PUSH;
+            } else if (lastInX >= 512 + 209) {
+                inX = 512 + COLUMN_PUSH;
+            }
+            if (lastInY < 512 - 209) {
+                inY = 512 - COLUMN_PUSH;
+            } else if (lastInY >= 512 + 209) {
+                inY = 512 + COLUMN_PUSH;
+            }
+        }
+
+        // br2_UP / br2_DOWN: the corners. tst.b on the two faces that meet at the corner from
+        // the neighbouring cells - anything at all, open doors included - and then push back
+        // along the axis that went in less, X when the two are equal.
+        int nY = (cy + 1) & 63, sY = (cy - 1) & 63, eX = (cx + 1) & 63, wX = (cx - 1) & 63;
+        if (inY >= FAR) {
+            if (inX < r && (level.faceByte(cx, nY, Level.WEST_DIR) != 0
+                    || level.faceByte(wX, cy, Level.NORTH_DIR) != 0)) {
+                if (inY - FAR >= r - inX) {
+                    inX = r;
+                } else {
+                    inY = FAR;
+                }
+            }
+            if (inX >= FAR && (level.faceByte(cx, nY, Level.EAST_DIR) != 0
+                    || level.faceByte(eX, cy, Level.NORTH_DIR) != 0)) {
+                if (inY - FAR >= inX - FAR) {
+                    inX = FAR;
+                } else {
+                    inY = FAR;
+                }
+            }
+        }
+        if (inY < r) {
+            if (inX < r && (level.faceByte(cx, sY, Level.WEST_DIR) != 0
+                    || level.faceByte(wX, cy, Level.SOUTH_DIR) != 0)) {
+                if (r - inY >= r - inX) {
+                    inX = r;
+                } else {
+                    inY = r;
+                }
+            }
+            if (inX >= FAR && (level.faceByte(cx, sY, Level.EAST_DIR) != 0
+                    || level.faceByte(eX, cy, Level.SOUTH_DIR) != 0)) {
+                if (r - inY >= inX - FAR) {
+                    inX = FAR;
+                } else {
+                    inY = r;
+                }
+            }
+        }
+        finishBorder(inX, inY);
+    }
+
+    /** br2_END: {@code andi #$fc00 / or}, and sv_InSquarePos for the next pass. */
+    private void finishBorder(int inX, int inY) {
+        posX = (posX & ~1023) | inX;
+        posY = (posY & ~1023) | inY;
         lastInX = inX;
         lastInY = inY;
     }
 
-    private static boolean insideColumnBox(int inX, int inY) {
-        return inX >= 512 - COLUMN_HALF && inX <= 512 + COLUMN_HALF
-                && inY >= 512 - COLUMN_HALF && inY <= 512 + COLUMN_HALF;
+    /**
+     * br2_COLUMN: byte 7 of the cell names an enemy, and if it stands within 300 units of the
+     * player on both axes the move is undone — sv_LastPos goes back into sv_PosX and the walls'
+     * clamping is thrown away with it. A burning one costs a point of energy (not spared on
+     * easy), SOUND 13 and SCROLL 71.
+     *
+     * @return true when the player was put back, which ends sv_Border at br2_END2
+     */
+    private boolean enemyInTheWay(int cx, int cy) {
+        Enemy e = enemyAt(level.enemyRef(cx, cy) & 0xff);
+        if (e == null || Math.abs(e.x - posX) >= 300 || Math.abs(e.y - posY) >= 300) {
+            return false;
+        }
+        if (e.state == Enemy.BURNING) {
+            inventory.hurt(1);
+            playSound(SoundTable.PLAYER_HURT);
+            log.add(text(71, "OUCH! IT'S HOT!"));
+        }
+        posX = lastPosX;
+        posY = lastPosY;
+        lastInX = posX & 1023;
+        lastInY = posY & 1023;
+        return true;
     }
 
     /**
-     * Stops the player cutting a corner diagonally when both cells beyond the corner are walled
-     * off, which is what br2_UP and br2_DOWN do. Pushes back along the axis with less penetration.
+     * br_BumpWall: walking into a wall at speed costs a point of energy and earns an insult, and
+     * throws the player back off it.
+     *
+     * Each caller hands it sv_LastMove+2 less the direction that goes straight into its face,
+     * plus 62 ({@code d5}), and the face's quadrant ({@code d4}: 512 west, 0 east, 756 south, 256
+     * north). The hit counts only when d5 lands in 0..123 — within 62 of head on, so brushing a
+     * wall as you walk along it is free — and only on a stride of 120 or more. Then:
+     *
+     * <ul>
+     * <li>sv_LastMove+4 takes the stride and sv_LastMove+6 the reflected direction,
+     *     {@code d4 - (sv_LastMove+2 + 256)}: the next passes carry the player back off the
+     *     wall, 60 shorter each time (see {@link #doMMove});</li>
+     * <li>two passes of interference, a point of energy unless on easy, SOUND 1, EXCITE;</li>
+     * <li>SCROLL 40 for a shut door, 42 for one still moving, 1 for anything else.</li>
+     * </ul>
+     *
+     * The south face's 378 is six units off the true 384 in the original, and is kept.
      */
-    private int fixDiagonal(int cx, int cy, int inX, int inY, boolean wantX) {
-        final int r = PLAYER_RADIUS;
-        final int far = Level.CELL_UNITS - r;
-        int dirX = (inX < r) ? Level.WEST_DIR : (inX > far) ? Level.EAST_DIR : -1;
-        int dirY = (inY < r) ? Level.SOUTH_DIR : (inY > far) ? Level.NORTH_DIR : -1;
-        if (dirX < 0 || dirY < 0) {
-            return wantX ? inX : inY;
+    private void bumpWall(int d5, int quadrant, int bumpedWall) {
+        if (d5 < 0 || d5 >= BUMP_WINDOW) {
+            return;
         }
-        int nx = cx + Level.DX[dirX], ny = cy + Level.DY[dirX];
-        int mx = cx + Level.DX[dirY], my = cy + Level.DY[dirY];
-        boolean blocked =
-                (Level.inside(nx, ny) && !level.isPassable(nx, ny, dirY))
-                || (Level.inside(mx, my) && !level.isPassable(mx, my, dirX));
-        if (!blocked) {
-            return wantX ? inX : inY;
+        if (lastMoveLen < 120) {
+            return;
         }
-        int penX = (dirX == Level.WEST_DIR) ? (r - inX) : (inX - far);
-        int penY = (dirY == Level.SOUTH_DIR) ? (r - inY) : (inY - far);
-        if (penY >= penX) {
-            return wantX ? inX : ((dirY == Level.SOUTH_DIR) ? r : far);
+        reboundLen = lastMoveLen;
+        reboundDir = (quadrant - (lastMoveDir + 256)) & 0x1fe;
+        szum();
+        // tst sv_difficult / bne .NieOd: no energy lost on the easy setting
+        if (!easy) {
+            inventory.hurt(1);
         }
-        return wantX ? ((dirX == Level.WEST_DIR) ? r : far) : inY;
+        playSound(SoundTable.BUMP);
+        heart.excite();
+        switch (bumpedWall & 62) {
+            case 30: case 36:
+                log.add(text(TextTable.BUMP_DOOR, "the door is shut"));
+                break;
+            case 34: case 40:
+                log.add(text(TextTable.BUMP_OPENING_DOOR, "wait until the door opens"));
+                break;
+            default:
+                log.add(text(TextTable.BUMP_INSULT, "ouch"));
+                break;
+        }
     }
+
+    /** {@code bmi} then {@code cmpi #124,d5}: a window of 124 units, so 62 either side. */
+    private static final int BUMP_WINDOW = 124;
+
+    /**
+     * UpdateMap: the square underfoot, then for each side whose face byte is zero
+     * ({@code tst.b}, so an open door hides what is beyond it) the neighbour through it, and
+     * from that neighbour the two squares to either side whose faces towards it are clear too.
+     * So the map reveals up to a 3 x 3 block, which is why a room fills in as you enter it.
+     */
+    private void markVisited() {
+        int cx = cellX(), cy = cellY();
+        reveal(cx, cy);
+        for (int d = 0; d < 4; d++) {
+            if (level.faceByte(cx, cy, d) != 0) {
+                continue;
+            }
+            int nx = cx + Level.DX[d], ny = cy + Level.DY[d];
+            if (!Level.inside(nx, ny)) {
+                continue;
+            }
+            reveal(nx, ny);
+            // the two sides at right angles: N and S look east then west, E and W north then south
+            int[] sides = (d == Level.NORTH_DIR || d == Level.SOUTH_DIR)
+                    ? new int[]{Level.EAST_DIR, Level.WEST_DIR}
+                    : new int[]{Level.NORTH_DIR, Level.SOUTH_DIR};
+            for (int side : sides) {
+                if (level.faceByte(nx, ny, side) == 0) {
+                    reveal(nx + Level.DX[side], ny + Level.DY[side]);
+                }
+            }
+        }
+    }
+
+    private void reveal(int x, int y) {
+        if (Level.inside(x, y)) {
+            visited[x + y * Level.GRID] = true;
+        }
+    }
+
+    /**
+     * Take_Items: an item is collected when the player is inside a 220 unit box around the centre
+     * of its cell. The engine clears only the low six bits, keeping the block flag.
+     */
+    private void takeItems() {
+        int cx = cellX(), cy = cellY();
+        int item = level.item(cx, cy);
+        if (item == 0) {
+            return;
+        }
+        int inX = posX % Level.CELL_UNITS;
+        int inY = posY % Level.CELL_UNITS;
+        if (inX < 512 - 220 || inX > 512 + 220 || inY < 512 - 220 || inY > 512 + 220) {
+            return;
+        }
+        // the engine deletes the item before dispatching on it, so 21..31 simply vanish
+        level.removeItem(cx, cy);
+        geometryDirty = true;
+        String what = inventory.take(item);
+        if (what == null) {
+            return;
+        }
+        playSound(item >= Inventory.FIRST_AMMO && item < Inventory.FIRST_CARD
+                ? SoundTable.TAKE_AMMO
+                : item >= Inventory.MEDIKIT && item <= Inventory.VODKA
+                        ? SoundTable.TAKE_AID : SoundTable.TAKE_ITEM);
+        // Take_Items computes its SCROLL1 index as base + offset, and every branch works out to
+        // the item value itself: weapons 2 + (v-2), ammunition 8 + (v-8), cards 14 + (v-14), and
+        // the rest are literal SCROLLs at 17, 18 and 19.
+        //
+        // A warhead section is the exception. ti_Head falls through without a SCROLL of its own;
+        // DrawBomb prints it, at 77 plus the stage, so the six sections each get their own line
+        // from "FOUND THE FIRST PART OF THE BOMB!" to "YOU FOUND THE LAST PART OF THE BOMB!!!".
+        if (item == Inventory.WARHEAD) {
+            int stage = BombGfx.stageFor(inventory.warhead);
+            log.add(text(BOMB_TEXT + Math.max(0, stage), what));
+        } else {
+            log.add(text(item, what));
+        }
+    }
+
 
     // ------------------------------------------------------------ teleports
 
@@ -845,18 +1210,24 @@ public final class GameState {
         return false;
     }
 
-    private void checkExit() {
-        if (!levelComplete && cellX() == level.exitCellX && cellY() == level.exitCellY) {
-            levelComplete = true;
-            log.add("level complete");
-        }
-    }
 
     // ---------------------------------------------------------------- doors
 
     /**
-     * One of the two door channels the engine keeps, sv_DoorFlag1 and sv_DoorFlag2. Only one door
-     * of each type can be moving at a time, which is why the original stores a single slot.
+     * One of the two door channels, sv_DoorFlag1 and sv_DoorFlag2, field for field:
+     *
+     * <pre>
+     *   +0  flag     1 opening, 0 closing; br_Chk_OPEN clears it every pass
+     *   +1  counter  a signed byte: 6 (5 for door 1 once it has shut) is shut, -1 open
+     *   +2  faces    the faces being moved, each followed by its far side, -1 terminated
+     *   +20 in use
+     *   +22 serving a priority door
+     *   +24 the priority door queued by rm_FixDoor: flag, counter and faces as above
+     *   +44 the flag as it was when the door sound last played
+     * </pre>
+     *
+     * A face is kept as the cell, the direction and the mirror bit it had when it was listed,
+     * which is what {@code lsr d5 / roxl d4} packs into each offset word.
      */
     public static final class DoorSlot {
         /** 1 or 2: which family of door values this channel drives. */
@@ -865,215 +1236,466 @@ public final class GameState {
         final int closed;
         final int open;
         final int animating;
+        /** The count at which a closing door is shut: {@code cmpi.b #5} for door 1, 6 for door 2. */
+        final int shut;
 
-        boolean inUse;
         boolean opening;
-        /** 5 is fully closed, 0 is fully open, matching the counter in OpenCloseDoors. */
-        int counter = 5;
-        int cellX, cellY, dir;
-        boolean hasBack;
-        int backX, backY, backDir;
+        int counter;
+        final int[] faces = new int[FACE_ROOM];
+        int faceCount;
+        boolean inUse;
+        boolean prior;
+
+        boolean queuedOpening;
+        int queuedCounter;
+        final int[] queued = new int[FACE_ROOM];
+        int queuedCount;
+
+        int soundFlag;
 
         DoorSlot(int type) {
             this.type = type;
             this.closed = (type == 1) ? 30 : 36;
             this.open = (type == 1) ? 32 : 38;
             this.animating = (type == 1) ? 34 : 40;
+            this.shut = (type == 1) ? 5 : 6;
+            this.counter = shut;         // dc.w 5 and dc.w 6
         }
 
         public boolean isActive() {
             return inUse;
         }
 
+        /** True while this channel is moving a door a switch or card asked for. */
+        public boolean isPriority() {
+            return prior;
+        }
+
+        /** True while a priority door waits for this channel. */
+        public boolean hasQueued() {
+            return queuedCount > 0;
+        }
+
+        /** 1 or 2. */
+        public int type() {
+            return type;
+        }
+
+        /** Faces in the list, far sides included. */
+        public int faceCount() {
+            return faceCount;
+        }
+
+        public int faceX(int i) {
+            return faces[i] & 63;
+        }
+
+        public int faceY(int i) {
+            return (faces[i] >> 6) & 63;
+        }
+
+        public int faceDir(int i) {
+            return (faces[i] >> 12) & 3;
+        }
+
+        /** The cell of the first face listed. */
         public int cellX() {
-            return cellX;
+            return faceCount > 0 ? faceX(0) : 0;
         }
 
         public int cellY() {
-            return cellY;
+            return faceCount > 0 ? faceY(0) : 0;
         }
 
-        public int dir() {
-            return dir;
+        /** The counter as it stands, -1 open to 5 or 6 shut. */
+        public int counter() {
+            return counter;
         }
 
-        /** 0 shut, 1 fully open. */
+        /**
+         * How far open a face with this channel's animating value is drawn, 0 shut to 1 open.
+         * oc_DrawOpen draws every door-1 face holding 34 from one texture it rebuilds from the
+         * counter, {@code counter + 1} rows of 5 still showing; oc_DrawOpen2 does the same for
+         * door 2 over six steps.
+         */
         public float openFraction() {
-            return (5 - counter) / 5f;
+            float f = (type == 1) ? (4 - counter) / 5f : (5 - counter) / 6f;
+            return Math.max(0f, Math.min(1f, f));
         }
     }
+
+    /** Room for a face list: four doors, each with its far side, and more for a busy trigger. */
+    private static final int FACE_ROOM = 64;
 
     public DoorSlot[] doorSlots() {
         return doors;
     }
 
     /**
-     * br_Chk_OPEN plus OpenCloseDoors: any door of the right family on a face of the cell the
-     * player stands in opens by itself, unless that cell carries the block flag. When the player
-     * leaves, the same door closes again.
+     * How far open the door on a face is drawn: 0 for a shut (or broken) door, 1 for an open
+     * one, and in between for a face holding a channel's animating value. That value draws one
+     * shared texture per door type, so every face holding it shows the channel's counter.
      */
-    private void serveDoors() {
-        int cx = cellX(), cy = cellY();
-        for (DoorSlot slot : doors) {
-            boolean wantOpen = false;
-            if (!level.isBlocked(cx, cy)) {
-                for (int d = 0; d < 4; d++) {
-                    int v = level.wallValue(cx, cy, d) & 0xff;
-                    if (v >= slot.closed && v < slot.closed + 6) {
-                        if (!slot.inUse || slot.cellX != cx || slot.cellY != cy || slot.dir != d) {
-                            claim(slot, cx, cy, d);
-                        }
-                        wantOpen = true;
-                        break;
-                    }
-                }
-            }
-            slot.opening = wantOpen;
-            animate(slot);
+    public float doorOpenFraction(int x, int y, int dir) {
+        switch (level.wallValue(x, y, dir) & 62) {
+            case 32: case 38:
+                return 1f;
+            case 34:
+                return doors[0].openFraction();
+            case 40:
+                return doors[1].openFraction();
+            default:
+                return 0f;
         }
     }
 
-    private void claim(DoorSlot slot, int cx, int cy, int d) {
-        if (slot.inUse && slot.counter != 5 && slot.counter != 0) {
-            return; // leave a door that is still mid-animation alone
-        }
-        slot.inUse = true;
-        slot.cellX = cx;
-        slot.cellY = cy;
-        slot.dir = d;
-        int nx = cx + Level.DX[d], ny = cy + Level.DY[d];
-        slot.hasBack = Level.inside(nx, ny);
-        if (slot.hasBack) {
-            slot.backX = nx;
-            slot.backY = ny;
-            slot.backDir = Level.OPPOSITE[d];
-        }
-        int v = level.wallValue(cx, cy, d) & 0xff;
-        slot.counter = (v == slot.open) ? 0 : 5;
-        if (slot.counter != 0) {
-            // OpenCloseDoors plays the door sound at the door's own cell, via SOUND2.
-            playSoundAt(slot.type == 1 ? SoundTable.DOOR1 : SoundTable.DOOR2,
-                    cx * Level.CELL_UNITS + 512, cy * Level.CELL_UNITS + 512);
-        }
+    private static int packFace(int x, int y, int dir, int mirror) {
+        return (x & 63) | ((y & 63) << 6) | ((dir & 3) << 12) | ((mirror & 1) << 14);
     }
 
-    private void animate(DoorSlot slot) {
-        if (!slot.inUse) {
+    /** Appends a face and its far side ({@code addi #512+2 ... andi #$7ffb}, wrapping). */
+    private int listFace(int[] list, int n, int x, int y, int dir) {
+        if (n + 2 > list.length) {
+            return n;
+        }
+        list[n++] = packFace(x, y, dir, level.wallValue(x, y, dir) & 1);
+        int nx = (x + Level.DX[dir]) & 63, ny = (y + Level.DY[dir]) & 63;
+        int od = Level.OPPOSITE[dir];
+        list[n++] = packFace(nx, ny, od, level.wallValue(nx, ny, od) & 1);
+        return n;
+    }
+
+    /**
+     * br_Chk_OPEN, from sv_Border, for one channel: the flag is cleared, and unless the cell
+     * carries the block flag each N, E, S and W face whose whole byte lies in the channel's range
+     * (30..35 or 36..41, so a door with blood on it never opens) is listed with its far side,
+     * br_ChkDoorStatus sets the counter from it — 6 if shut, -1 if open, left alone if moving,
+     * the last face listed winning — and the channel is put in use with the flag set.
+     *
+     * The list is rewritten only when the cell has such a door, so on leaving it the doors
+     * listed keep closing; and a door left behind for another cell's stays as it was, open or
+     * half way, until it is next listed.
+     */
+    private void checkOpen(DoorSlot s, int cx, int cy) {
+        s.opening = false;
+        if (level.isBlocked(cx, cy)) {
             return;
         }
-        if (slot.opening) {
-            if (slot.counter > 0) {
-                slot.counter--;
-                writeDoor(slot, slot.counter == 0 ? slot.open : slot.animating);
+        int n = 0;
+        for (int d = 0; d < 4; d++) {
+            int v = level.faceByte(cx, cy, d);
+            if (v < s.closed || v >= s.closed + 6) {
+                continue;
             }
-        } else {
-            if (slot.counter < 5) {
-                slot.counter++;
-                writeDoor(slot, slot.counter == 5 ? slot.closed : slot.animating);
+            n = listFace(s.faces, n, cx, cy, d);
+            int status = v & 0xfe;
+            if (status == s.closed) {
+                s.counter = 6;
+            } else if (status == s.open) {
+                s.counter = -1;
+            }
+            s.faceCount = n;
+            s.opening = true;
+            s.inUse = true;
+        }
+    }
+
+    /**
+     * OpenCloseDoors, for one channel in use.
+     *
+     * When the flag differs from the one remembered at +44 the door sound plays, from the first
+     * face's square — so a door makes its noise starting to open and starting to close. Door 1
+     * plays SOUND2 9, or 16 on a level whose header word 26 is set; door 2 plays 10, from a point
+     * a square east of the one it means and half a square south of it ({@code addi #512,d0}
+     * twice, never d1).
+     *
+     * Opening counts down: door 1 first comes down to 5, so from shut it shows the moving value
+     * for five passes and is open on the sixth; door 2 for six and open on the seventh. Closing
+     * counts up to 5 or 6, so door 1 takes six passes to shut and door 2 seven. A priority door
+     * gives the channel back as soon as it is fully open or shut.
+     */
+    private void openCloseDoors() {
+        for (DoorSlot s : doors) {
+            if (!s.inUse) {
+                continue;
+            }
+            int flag = s.opening ? 1 : 0;
+            if (flag != s.soundFlag && s.faceCount > 0) {
+                int fx = s.faceX(0), fy = s.faceY(0);
+                if (s.type == 1) {
+                    playSoundAt(level.doorSound16 ? SoundTable.DOOR3 : SoundTable.DOOR1,
+                            fx * Level.CELL_UNITS + 512, fy * Level.CELL_UNITS + 512);
+                } else {
+                    playSoundAt(SoundTable.DOOR2,
+                            fx * Level.CELL_UNITS + 1024, fy * Level.CELL_UNITS);
+                }
+            }
+            s.soundFlag = flag;
+            if (s.opening) {
+                if (s.type == 1 && s.counter >= 6) {
+                    s.counter = 5;                  // cmpi.b #6 / bmi / move.b #5
+                }
+                s.counter--;
+                if (s.counter >= 0) {
+                    writeDoor(s, s.animating);
+                } else {
+                    s.counter = -1;
+                    writeDoor(s, s.open);
+                    if (s.prior) {
+                        release(s);
+                    }
+                }
             } else {
-                writeDoor(slot, slot.closed);
-                slot.inUse = false;
+                s.counter++;
+                if (s.counter >= s.shut) {
+                    s.counter = s.shut;
+                    writeDoor(s, s.closed);
+                    release(s);
+                } else {
+                    writeDoor(s, s.animating);
+                }
             }
         }
     }
 
-    private void writeDoor(DoorSlot slot, int value) {
-        setFace(slot.cellX, slot.cellY, slot.dir, value);
-        if (slot.hasBack) {
-            setFace(slot.backX, slot.backY, slot.backDir, value);
+    /** {@code move #-1,(a1) / move.l #0,20(a1)}: list emptied, not in use, not a priority. */
+    private static void release(DoorSlot s) {
+        s.faceCount = 0;
+        s.inUse = false;
+        s.prior = false;
+    }
+
+    /**
+     * oc_FixMap: {@code move.b d2,(a2,d1.w)} writes the whole byte, the door value with the
+     * mirror bit the face had when it was listed, so any blood on it goes.
+     */
+    private void writeDoor(DoorSlot s, int value) {
+        for (int i = 0; i < s.faceCount; i++) {
+            int f = s.faces[i];
+            int x = f & 63, y = (f >> 6) & 63, d = (f >> 12) & 3;
+            level.setWallValue(x, y, d, value | ((f >> 14) & 1));
+            level.setBlood(x, y, d, 0);
         }
     }
 
-    /** Writes a cell value while keeping the mirror bit the map author chose for that face. */
-    private void setFace(int x, int y, int dir, int value) {
-        int mirror = level.wallValue(x, y, dir) & 1;
-        level.setWallValue(x, y, dir, value | mirror);
+    /**
+     * ServePriorDoor, once a pass after Check_RMB: a channel not in use takes the priority door
+     * queued for it, if there is one, and is marked in use and serving a priority. Until it
+     * finishes, br_Chk_OPEN leaves that channel alone, so automatic doors of the same type stay
+     * as they are.
+     */
+    private void servePriorDoor(DoorSlot s) {
+        if (s.inUse || s.queuedCount == 0) {
+            return;
+        }
+        s.opening = s.queuedOpening;
+        s.counter = s.queuedCounter;
+        System.arraycopy(s.queued, 0, s.faces, 0, s.queuedCount);
+        s.faceCount = s.queuedCount;
+        s.queuedCount = 0;
+        s.inUse = true;
+        s.prior = true;
+    }
+
+    /**
+     * rm_OpenDoor / rm_CloseDoor and rm_FixDoor: a door a command moves is queued on the
+     * priority table of its channel ({@code sv_DoorFlag+24}) rather than set, and animates once
+     * ServePriorDoor hands it over.
+     *
+     * The face's whole byte, mirror bit dropped, decides: already open (or shut) is skipped, a
+     * door already moving is skipped, 30 or 32 is door 1 and anything else door 2. The queue's
+     * flag and counter become {@code $0106} to open or {@code $00ff} to close — so the last
+     * command decides for every door queued with it — the face and its far side are appended,
+     * and the channel's sound flag is set to 50 so that the next pass it is served plays the
+     * sound.
+     */
+    private void fixDoor(int x, int y, int dir, boolean open) {
+        int b = level.faceByte(x, y, dir) & 0xfe;
+        if (open ? (b == 32 || b == 38) : (b == 30 || b == 36)) {
+            return;
+        }
+        if (b == 34 || b == 40) {
+            return;
+        }
+        DoorSlot s = (b == 30 || b == 32) ? doors[0] : doors[1];
+        s.soundFlag = 50;
+        s.queuedOpening = open;
+        s.queuedCounter = open ? 6 : -1;
+        s.queuedCount = listFace(s.queued, s.queuedCount, x, y, dir);
     }
 
     // -------------------------------------------------------------- enemies
 
+    /** GetRandom: a word of Amiga ROM in the original, a word of a seeded PRNG here. */
+    private int random() {
+        return rnd.nextInt(65536);
+    }
+
+    /** {@code asr.b #n,d0 / ext d0}: the low byte of a word, as a signed byte, shifted down. */
+    static int asrByte(int word, int n) {
+        return ((byte) word) >> n;
+    }
+
+    /** sq_SQRT, which approximates a floor square root digit by digit. */
+    static int isqrt(long v) {
+        long r = (long) Math.sqrt((double) v);
+        while (r * r > v) {
+            r--;
+        }
+        while ((r + 1) * (r + 1) <= v) {
+            r++;
+        }
+        return (int) r;
+    }
+
     /**
-     * Move_Enemy. The original only simulates the 24 x 24 cells around the player, which is both
-     * a performance measure and a gameplay one: enemies further away stand still.
+     * sv_sinus, 256 entries a turn. The engine loads it from data at run time; it is taken here
+     * as {@code round(32767 sin)}, the only Q15 table whose top entry fits a signed word.
+     */
+    private static final int[] SIN = new int[256];
+
+    static {
+        for (int k = 0; k < SIN.length; k++) {
+            SIN[k] = (int) Math.round(Math.sin(2 * Math.PI * k / 256) * 32767);
+        }
+    }
+
+    /**
+     * sv_rotate with x = 0 and y = {@code len}, which is how every caller uses it to build a
+     * vector: {@code muls} by the cosine and the sine at table offset {@code d6}, then
+     * {@code add.l d0,d0 / swap}, i.e. {@code (len * table * 2) >> 16}.
+     *
+     * Callers hand it {@code 256 - angle} (plus any spread) masked with {@code $1fe}, which is
+     * what turns the result into the forward vector {@code (-cos a, sin a)}.
+     *
+     * @return {x, y}
+     */
+    static int[] rotate(int len, int d6) {
+        return rotate(0, len, d6);
+    }
+
+    /**
+     * sv_rotate in full: {@code x' = x sin + y cos}, {@code y' = y sin - x cos}, each
+     * {@code add.l / swap}, so {@code (v * 2) >> 16} — a floor, not a rounding. sv_DoMMove hands
+     * it the drunk sideways jitter as x and the length of the step as y.
+     *
+     * @return {x', y'}
+     */
+    static int[] rotate(int x, int y, int d6) {
+        int k = (d6 & 0x1fe) >> 1;
+        int sin = SIN[k];
+        int cos = SIN[(k + 64) & 255];
+        return new int[]{((x * sin + y * cos) * 2) >> 16, ((y * sin - x * cos) * 2) >> 16};
+    }
+
+    /** sv_EnemyData by slot, which is how a cell's byte 7 finds its enemy. */
+    private final Enemy[] bySlot = new Enemy[256];
+
+    private Enemy enemyAt(int slot) {
+        Enemy e = (slot > 0 && slot < bySlot.length) ? bySlot[slot] : null;
+        return (e == null || e.gone) ? null : e;
+    }
+
+    /**
+     * Move_Enemy. The list is built first, from byte 7 of every cell in the 24 x 24 window from
+     * 12 cells behind the player to 11 ahead on each axis ({@code subi #[12*512]+[12*8]+1} then
+     * 24 rows of 24), and only those enemies are served: the rest of the level stands still.
      */
     private void moveEnemies() {
         int px = cellX(), py = cellY();
-        for (Enemy e : enemies) {
-            if (e.isDead()) {
-                continue;
+        List<Enemy> found = new ArrayList<Enemy>();
+        for (int y = py - 12; y < py + 12; y++) {
+            for (int x = px - 12; x < px + 12; x++) {
+                if (!Level.inside(x, y)) {
+                    continue;
+                }
+                Enemy e = enemyAt(level.enemyRef(x, y));
+                if (e != null) {
+                    found.add(e);
+                }
             }
-            if (Math.abs(e.cellX() - px) > 12 || Math.abs(e.cellY() - py) > 12) {
-                continue;
+        }
+        for (Enemy e : found) {
+            if (playerDead) {
+                return;
             }
             switch (e.state) {
                 case Enemy.HIT:
-                    if (--e.counter <= 0) {
-                        e.state = Enemy.WALKING;
-                    }
+                    meHited(e);
+                    break;
+                case Enemy.KILLED:
+                    meKilled(e);
                     break;
                 case Enemy.BURNING:
-                    if (--e.energy <= 0) {
-                        kill(e);
-                    }
+                    meBurning(e);
                     break;
                 case Enemy.SHOOTING:
-                    // me_shootON adds 4 a frame and fires at 68, so eight frames of wind-up.
-                    e.counter += 4;
-                    if (e.counter >= 68) {
-                        fire(e);
-                        e.state = Enemy.WALKING;
-                        e.counter = 0;
-                    }
+                    meShootOn(e);
+                    break;
+                case Enemy.WALKING:
+                    meWalk(e);
                     break;
                 default:
-                    if (e.reload > 0) {
-                        e.reload--;
-                    }
-                    think(e);
-                    break;
+                    break;   // bne.s me_Found: any other state is left alone
             }
         }
     }
 
     /**
-     * me_walk: roll against distance plus the species' stats to decide between closing in and
-     * standing off, then shoot if there is a clear line.
+     * me_angletab: the bearing to the player is not computed but looked up, by
+     * {@code (dx * 16) / dist}, so an enemy aims in 33 steps across a half turn.
      */
-    private void think(Enemy e) {
+    private static final int[] ME_ANGLE_TAB = {
+            0, 22, 40, 50, 58, 66, 72, 80, 86, 92, 96, 102, 106, 112, 118, 124, 128,
+            134, 138, 144, 150, 154, 160, 164, 170, 176, 184, 190, 198, 206, 216, 230, 256,
+    };
+
+    /**
+     * The angle me_a1 and me_ShootIt set to face the player, from the offsets enemy less player:
+     * {@code divs} by the distance, the table, negated when the enemy is south of the player,
+     * {@code addi #256 / andi #$1fe}.
+     */
+    static int aimAt(int dx, int dy, int dist) {
+        int q = (dist == 0) ? 0 : (dx * 16) / dist;
+        int a = ME_ANGLE_TAB[Math.max(-16, Math.min(16, q)) + 16];
+        if (dy < 0) {
+            a = -a;
+        }
+        return (a + 256) & 0x1fe;
+    }
+
+    /**
+     * me_walk: roll a number under 8192 against the distance plus the species' energy word.
+     * At or under it is me_ShootIt — a roll under 5000 just walks on, anything else turns to the
+     * player and fires if CanShoot allows. Over it, the enemy turns to the player and me_w3 fires
+     * when the distance is under the roll modulo distance plus aggression; otherwise it walks.
+     */
+    private void meWalk(Enemy e) {
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
         int dx = e.x - posX;
         int dy = e.y - posY;
-        int dist = (int) Math.sqrt((double) dx * dx + (double) dy * dy);
-        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
-        int roll = rnd.nextInt(8192);
-
-        if (e.reload > 0) {
-            wander(e);
-            return;
-        }
-        boolean standOff = dist + stats.energy >= roll;
-        int toPlayer = angleTowards(-dx, -dy);
-
-        if (standOff) {
+        int dist = isqrt((long) dx * dx + (long) dy * dy);
+        int roll = random() & 0x1fff;
+        if (dist + stats.energy >= roll) {
             if (roll < 5000) {
-                wander(e);
+                meStep(e);
                 return;
             }
-            e.angle = toPlayer;
-            if (canShoot(e.x, e.y, posX, posY)) {
+            e.angle = aimAt(dx, dy, dist);
+            if (lineOfSight(e.x, e.y, posX, posY, dist)) {
                 beginShooting(e);
             } else {
-                wander(e);
+                meStep(e);
             }
             return;
         }
-
-        e.angle = toPlayer;
-        // me_w3: the closer the enemy is relative to its aggression, the likelier it fires.
-        int spread = dist + stats.aggression;
-        if (dist < (spread == 0 ? 1 : roll % spread) && canShoot(e.x, e.y, posX, posY)) {
+        e.angle = aimAt(dx, dy, dist);
+        int range = (dist + stats.aggression) & 0xffff;
+        // divu d2,d1 / swap: the remainder; a zero divisor would trap, so it just walks
+        if (range != 0 && dist < roll % range && lineOfSight(e.x, e.y, posX, posY, dist)) {
             beginShooting(e);
         } else {
-            wander(e);
+            meStep(e);
         }
     }
 
@@ -1082,42 +1704,244 @@ public final class GameState {
         e.counter = Enemy.SHOOT_COUNTER;
     }
 
-    /** me_w4 then me_RepTurn: walk, and on a blocked step turn at random and retry up to 3 times. */
-    private void wander(Enemy e) {
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (stepEnemy(e)) {
-                if (rnd.nextInt(256) >= 0xf0) {
-                    e.angle = (e.angle + (rnd.nextInt(127) - 63) * 2) & 511;
+    /**
+     * me_w4: a roar now and then, one step along the facing, and what to do about the result.
+     *
+     * <ul>
+     * <li>The roar takes a GetRandom word of 5..9, so 5 in 65536 a pass, and plays SOUND4
+     *     18 + (word &amp; 3), with 3 read as 0.</li>
+     * <li>A step that goes through is me_w2: one pass in 16 ({@code $f0} of a byte) the enemy
+     *     turns by up to &plusmn;126, {@code (r0 ^ r1) &amp; $7e}, negative when r0 is even.</li>
+     * <li>A blocked step is me_RepTurn: up to three turns of {@code (r0 ^ r1) &amp; $fe} each,
+     *     retrying after each — but with the vector saved in sv_MovSav before the first try,
+     *     not one along the new facing. So a blocked enemy does not move that pass; it only
+     *     turns, and walks off in the new direction next time. Each retry still runs me_MOVE's
+     *     whole test, so one pressed against the player shoves and turns him every time.</li>
+     * </ul>
+     */
+    private void meStep(Enemy e) {
+        int r = random();
+        if (r >= 5 && r < 10) {
+            int d2 = r & 3;
+            if (d2 == 3) {
+                d2 = 0;
+            }
+            playSoundAt(SoundTable.ENEMY_ROAR_FIRST + d2, e.x, e.y);
+        }
+        int[] v = rotate(e.speed, (256 - e.angle) & 0x1fe);
+        if (meMove(e, v[0], v[1])) {
+            int r0 = random(), r1 = random();
+            if ((r0 & 0xff) >= 0xf0) {
+                int t = (r0 ^ r1) & 0x7e;
+                if ((r0 & 1) == 0) {
+                    t = -t;
                 }
+                e.angle = (e.angle + t) & 0x1fe;
+            }
+            return;
+        }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            int r0 = random(), r1 = random();
+            int t = (r0 ^ r1) & 0xfe;
+            if ((r0 & 1) == 0) {
+                t = -t;
+            }
+            e.angle = (e.angle + t) & 0x1fe;
+            if (meMove(e, v[0], v[1])) {
                 return;
             }
-            e.angle = (e.angle + (rnd.nextInt(127) - 63) * 2) & 511;
         }
     }
 
     /**
-     * me_MOVE: try to advance along the enemy's facing, refusing the step if it would cross a
-     * shut face, enter a column, land on another enemy, or walk into the player.
+     * me_shootON: four a pass from 60, the shot at 68 (es_EnemyShoot), and at 72 back to walking
+     * with the counter at 60.
      *
-     * @return true when the enemy actually moved
+     * The return to walking does {@code move.b #0,12(a3)} and then {@code bne me_Found}, which
+     * cannot branch after a move of zero: it falls into me_hited. So every shot ends with the
+     * enemy shoved along its stored knockback and its counter at 64 — harmless for the walk,
+     * which never reads it, but a real move when the last hit left a knockback behind.
      */
-    private boolean stepEnemy(Enemy e) {
-        int nx = e.x + (int) Math.round(forwardX(e.angle) * e.speed);
-        int ny = e.y + (int) Math.round(forwardY(e.angle) * e.speed);
+    private void meShootOn(Enemy e) {
+        e.counter = (e.counter + 4) & 0xff;
+        if (e.counter == 68) {
+            enemyShoot(e);
+            return;
+        }
+        if (e.counter != 72) {
+            return;
+        }
+        e.counter = Enemy.SHOOT_COUNTER;
+        e.state = Enemy.WALKING;
+        meHited(e);
+    }
+
+    /**
+     * me_hited: two passes of recoil, the counter going 72, 76, 80, each moving the enemy by
+     * twice its knockback bytes ({@code ext / lsl #1}). The grunt the engine plays on the first
+     * of them is played by {@link #hurtEnemy} as the hit lands.
+     */
+    private void meHited(Enemy e) {
+        meMove(e, e.knockX * 2, e.knockY * 2);
+        e.counter = (e.counter + 4) & 0xff;
+        if (e.counter == 80) {
+            e.state = Enemy.WALKING;   // move #0,12(a3) clears the counter too
+            e.counter = 0;
+        }
+    }
+
+    /**
+     * me_killed: three passes of falling, still shoved by the knockback. The counter goes 72,
+     * then 76 which is bumped to 88, 92 and 96: frames 18, 22 and 23. All that time the enemy
+     * keeps its cell, so it blocks the way and soaks up shots (EnemyHitServe ignores a dead one
+     * but Object_Collision still stops there).
+     */
+    private void meKilled(Enemy e) {
+        meMove(e, e.knockX * 2, e.knockY * 2);
+        e.counter = (e.counter + 4) & 0xff;
+        if (e.counter == 76) {
+            e.counter = 88;
+        }
+        if (e.counter == 96) {
+            finishKilled(e);
+        }
+    }
+
+    /**
+     * The end of me_killed. sv_NrKilled goes up, the enemy leaves its cell and its slot, and a
+     * corpse goes into the top bits of byte 5: 32, or 96 when {@code flags & 3} is 2 — which in
+     * every shipped map means the second species.
+     *
+     * Then one time in 12.8 ({@code GetRandom & $ff < 20}) the enemy leaves ammunition for its
+     * weapon, item {@code weapon + 7}, unless the cell already holds an item. There is a second
+     * roll, but only when the condition word of that weapon in sv_ITEMS is negative ("u have diz
+     * weapon?"). Conditions are never negative — DamageWeapon clamps at 0 and Take_Items writes
+     * 90 and more — so it is dead code for weapons 0..6; only a weapon 7, which reads the first
+     * card counter, would take it.
+     */
+    private void finishKilled(Enemy e) {
+        int cx = e.cellX(), cy = e.cellY();
+        removeEnemy(e);
+        boolean second = (e.flags & 3) == 2;
+        level.setCorpse(cx, cy, second ? 3 : 1);
+        int weapon = level.enemyTemplates[second ? 1 : 0].weapon;
+        if ((random() & 0xff) < 20 && level.item(cx, cy) == 0) {
+            boolean drop = weaponCondition(weapon) >= 0 || (random() & 0xff) < 20;
+            if (drop) {
+                level.setItem(cx, cy, (weapon + 7) & 31);
+            }
+        }
+    }
+
+    /** The word at sv_ITEMS + 4 + weapon * 6 that me_killed tests. */
+    private int weaponCondition(int weapon) {
+        if (weapon >= 0 && weapon < Inventory.WEAPON_COUNT) {
+            return inventory.condition[weapon];
+        }
+        return -1;   // weapon 7 lands on sv_Cards' $9de0
+    }
+
+    /** {@code addi #1,sv_NrKilled}, the cell's byte 7 cleared and {@code move #0,(a3)}. */
+    private void removeEnemy(Enemy e) {
+        killed++;
+        if (level.enemyRef(e.cellX(), e.cellY()) == e.slot) {
+            level.setEnemyRef(e.cellX(), e.cellY(), 0);
+        }
+        e.gone = true;
+        e.state = Enemy.KILLED;
+        geometryDirty = true;
+    }
+
+    /**
+     * me_burning: the energy word counts the burn down from 55, so 56 passes, while the counter
+     * flips between 80 and 84 and the enemy staggers one step a pass in a random direction —
+     * GetRandom masked to {@code $1fe} is the rotate index itself. A step into the player costs
+     * him a point of energy (see {@link #touchPlayer}). Below 0 it is a burnt corpse, 64 in byte
+     * 5, or 128 for the second species, and no ammunition.
+     */
+    private void meBurning(Enemy e) {
+        if (--e.energy < 0) {
+            if (fireOwner == e) {
+                fireOwner = null;   // move #$0004,$dff096: the fire loop stops
+            }
+            int cx = e.cellX(), cy = e.cellY();
+            removeEnemy(e);
+            level.setCorpse(cx, cy, (e.flags & 3) == 2 ? 4 : 2);
+            return;
+        }
+        if (fireOwner == e) {
+            fireVolume = soundDistance2(e.x, e.y);
+        }
+        e.counter ^= 4;
+        int[] v = rotate(e.speed, random() & 0x1fe);
+        meMove(e, v[0], v[1]);
+    }
+
+    /**
+     * eh_FirePos: the enemy whose burning owns the looping fire sample on audio channel 2. Each
+     * new fire takes the channel over; only the owner's death silences it.
+     */
+    private Enemy fireOwner;
+    /** The volume me_burning last wrote to the channel, 0..63, from Sound_Distance2. */
+    private int fireVolume;
+
+    /**
+     * The looping fire sample (sound_list entry 13, {@link SoundTable#FIRE_LOOP}): -1 while no
+     * enemy is burning, otherwise the Paula volume 0..63 me_burning computes each pass from the
+     * owner's distance.
+     */
+    public int fireLoopVolume() {
+        return fireOwner == null ? -1 : fireVolume;
+    }
+
+    /** Sound_Distance2: silent from 7990 units, else {@code 63 ^ (dist * 64 / 8000)}. */
+    private int soundDistance2(int x, int y) {
+        long dx = x - posX, dy = y - posY;
+        int d = isqrt(dx * dx + dy * dy);
+        if (d >= 7990) {
+            return 0;
+        }
+        return ((d << 6) / 8000) ^ 63;
+    }
+
+    /**
+     * me_MOVE, with the cell's byte 7 lifted while the step is tested and put back wherever the
+     * enemy ends up.
+     *
+     * @return true when the enemy moved
+     */
+    private boolean meMove(Enemy e, int dx, int dy) {
+        int fromX = e.cellX(), fromY = e.cellY();
+        if (level.enemyRef(fromX, fromY) == e.slot) {
+            level.setEnemyRef(fromX, fromY, 0);
+        }
+        boolean moved = meTryMove(e, dx, dy);
+        level.setEnemyRef(e.cellX(), e.cellY(), e.slot);
+        return moved;
+    }
+
+    /**
+     * me_MOVE's tests on the new position, in its order: another enemy in the cell; a shut face
+     * within 300 units ({@code cmpi #300} and {@code cmpi #1024-300}); a blocking column's
+     * 210 box; the player within 300 on both axes; and me_CORNERS, which refuses a corner whose
+     * two neighbouring faces hold anything at all ({@code tst.b}, open doors included).
+     *
+     * One test is the port's own: a crossing is also refused against the cell the step began
+     * in. me_MOVE only looks at the destination's faces; with walls stored on both sides that
+     * is the same thing, except on a face the map author left one-sided.
+     */
+    private boolean meTryMove(Enemy e, int dx, int dy) {
+        int nx = e.x + dx, ny = e.y + dy;
         if (nx < 0 || ny < 0 || nx >= 64 * Level.CELL_UNITS || ny >= 64 * Level.CELL_UNITS) {
             return false;
         }
         int fromX = e.cellX(), fromY = e.cellY();
-        int cx = nx / Level.CELL_UNITS, cy = ny / Level.CELL_UNITS;
-        int inX = nx % Level.CELL_UNITS, inY = ny % Level.CELL_UNITS;
+        int cx = nx >> 10, cy = ny >> 10;
+        int inX = nx & 1023, inY = ny & 1023;
 
-        int other = level.enemyRef(cx, cy);
-        if (other != 0 && other != e.slot) {
+        if (level.enemyRef(cx, cy) != 0) {
             return false;
         }
-        // Refuse the crossing from the cell the step began in, one axis at a time. Testing only
-        // the destination's own faces lets a diagonal step slip past a sealed corner, which looks
-        // exactly like an enemy walking through a wall.
         if (cx != fromX) {
             int dir = (cx > fromX) ? Level.EAST_DIR : Level.WEST_DIR;
             if (!level.isPassable(fromX, fromY, dir)) {
@@ -1131,43 +1955,95 @@ public final class GameState {
             }
         }
         final int r = Enemy.RADIUS;
-        final int far = Level.CELL_UNITS - r;
         if ((inX < r && !level.isPassable(cx, cy, Level.WEST_DIR))
-                || (inX > far && !level.isPassable(cx, cy, Level.EAST_DIR))
+                || (inX >= 1024 - r && !level.isPassable(cx, cy, Level.EAST_DIR))
                 || (inY < r && !level.isPassable(cx, cy, Level.SOUTH_DIR))
-                || (inY > far && !level.isPassable(cx, cy, Level.NORTH_DIR))) {
+                || (inY >= 1024 - r && !level.isPassable(cx, cy, Level.NORTH_DIR))) {
             return false;
         }
         int col = level.column(cx, cy);
         if (blockingColumn(col)
-                && inX >= 512 - Enemy.COLUMN_HALF && inX <= 512 + Enemy.COLUMN_HALF
-                && inY >= 512 - Enemy.COLUMN_HALF && inY <= 512 + Enemy.COLUMN_HALF) {
+                && inX >= 512 - Enemy.COLUMN_HALF && inY >= 512 - Enemy.COLUMN_HALF
+                && inX < 512 + Enemy.COLUMN_HALF && inY < 512 + Enemy.COLUMN_HALF) {
             return false;
         }
-        if (Math.abs(posX - nx) < Enemy.RADIUS && Math.abs(posY - ny) < Enemy.RADIUS) {
+        if (Math.abs(posX - nx) < r && Math.abs(posY - ny) < r) {
+            touchPlayer(e, dx, dy);
             return false;
         }
-
-        if (level.enemyRef(fromX, fromY) == e.slot) {
-            level.setEnemyRef(fromX, fromY, 0);
+        if (cornerBlocked(cx, cy, inX, inY)) {
+            return false;
         }
         e.x = nx;
         e.y = ny;
-        level.setEnemyRef(cx, cy, e.slot);
         return true;
     }
 
-    /**
-     * Frames an enemy waits between shots.
-     *
-     * The flamer, bolter and launcher now fire real projectiles whose flight time paces them on
-     * its own, but the handgun is hitscan in the original too, so a room of pistol-armed enemies
-     * would still empty an energy bar in seconds. This keeps them to a sane rate.
-     */
-    public static final int ENEMY_RELOAD = 25;
+    /** me_CORNERS: within 300 of a corner, the two faces meeting it from the neighbours. */
+    private boolean cornerBlocked(int cx, int cy, int inX, int inY) {
+        final int r = Enemy.RADIUS;
+        if (inX < r) {
+            if (inY < r) {
+                return anyFace(cx - 1, cy, Level.SOUTH_DIR) || anyFace(cx, cy - 1, Level.WEST_DIR);
+            }
+            if (inY >= 1024 - r) {
+                return anyFace(cx - 1, cy, Level.NORTH_DIR) || anyFace(cx, cy + 1, Level.WEST_DIR);
+            }
+        } else if (inX >= 1024 - r) {
+            if (inY < r) {
+                return anyFace(cx + 1, cy, Level.SOUTH_DIR) || anyFace(cx, cy - 1, Level.EAST_DIR);
+            }
+            if (inY >= 1024 - r) {
+                return anyFace(cx + 1, cy, Level.NORTH_DIR) || anyFace(cx, cy + 1, Level.EAST_DIR);
+            }
+        }
+        return false;
+    }
 
-    /** Sub-steps a projectile is advanced in per frame, so it cannot skip over a target. */
-    private static final int PROJECTILE_SUBSTEPS = 4;
+    private boolean anyFace(int x, int y, int dir) {
+        return Level.inside(x, y) && level.faceByte(x, y, dir) != 0;
+    }
+
+    /**
+     * me_PLAYER: an enemy stepping into the player shoves him by a quarter of its step
+     * (sv_AddMove, see {@link #addMove}), turns him by {@code asr.b #5}, -4..3, and, if it is
+     * burning, costs him a point of energy with SOUND 13 and SCROLL 71.
+     */
+    private void touchPlayer(Enemy e, int dx, int dy) {
+        addMove(dx >> 2, dy >> 2);
+        angle = (angle + asrByte(random(), 5)) & 0x1fe;
+        if (e.state == Enemy.BURNING) {
+            playSound(SoundTable.PLAYER_HURT);
+            inventory.hurt(1);
+            log.add(text(71, "you are burning"));
+        }
+    }
+
+    /**
+     * {@code add d2,sv_AddMove / add d3,sv_AddMove+2}: the push oc_PlayerHit and me_PLAYER give
+     * the player. It adds up over a pass and the next sv_DoMMove spends it, see
+     * {@link #doMMove} for how.
+     */
+    private void addMove(int dx, int dy) {
+        addMoveX = (short) (addMoveX + dx);
+        addMoveY = (short) (addMoveY + dy);
+    }
+
+    /**
+     * {@code move #len,sv_LastMove+4 / move dir,sv_LastMove+6}: the recoil a point-blank
+     * flamer, bolter or launcher shot throws the player back with, {@code moveAngle} being
+     * {@code -sv_Angle} in sv_rotate's terms, i.e. straight backwards. It is spent like a wall's
+     * rebound: 60 shorter on each of the following passes.
+     */
+    private void lastMove(int length, int moveAngle) {
+        reboundLen = length;
+        reboundDir = moveAngle & 0x1fe;
+    }
+
+    // -------------------------------------------------------- the object table
+
+    /** sv_ObjectTab holds 30 slots; a shot that finds none is simply not fired. */
+    public static final int OBJECT_SLOTS = 30;
 
     private final List<Projectile> projectiles = new ArrayList<Projectile>();
 
@@ -1175,220 +2051,697 @@ public final class GameState {
         return projectiles;
     }
 
+    /** {@code .SeekEmpty}: whether a slot is free. */
+    private boolean slotFree() {
+        int used = 0;
+        for (Projectile p : projectiles) {
+            if (p.type != 0) {
+                used++;
+            }
+        }
+        return used < OBJECT_SLOTS;
+    }
+
+    /** Takes a slot for a new object, or returns null when the table is full. */
+    private Projectile allocate(int type, int x, int y, int dx, int dy) {
+        if (!slotFree()) {
+            return null;
+        }
+        Projectile p = new Projectile(type, x, y, dx, dy);
+        projectiles.add(p);
+        return p;
+    }
+
     /**
-     * Anim_Objects: advance every object, age it, and resolve what it runs into. An object that
-     * hits nothing before its counter runs out simply disappears.
+     * sv_HitFlag: while set, Object_Collision cannot hit the player. Check_RMB holds it for the
+     * whole of the player's own shot, and ao_f2 / es_Launcher set it around ro_SetExplode when
+     * the rocket itself struck the player, so the blast does not hurt him a second time.
+     */
+    private boolean hitFlag;
+
+    /**
+     * eh_FirePos+4: set by ro_SetExplode while it throws its fireballs, so barrels stop them like
+     * walls and one explosion cannot set off the next.
+     */
+    private boolean barrelsShielded;
+
+    /**
+     * oc_beczkas: sixteen (map offset, damage) pairs, one per barrel that has been hit. A bullet
+     * adds 5 and anything else 30, and at 30 the barrel goes. When all sixteen are taken the
+     * first one is reused, damage and all.
+     */
+    private final int[] barrelOffset = new int[16];
+    private final int[] barrelDamage = new int[16];
+
+    /**
+     * Anim_Objects. Marks age and go: impacts and discharges after their counter reaches 3,
+     * explosions at 7. Flying objects add 2 to the counter, leave at 60 (fireball) or 40, and
+     * otherwise take one Object_Collision call, 8 sub-steps:
+     *
+     * <ul>
+     * <li>electricity that hits anything becomes a discharge mark ($0200);</li>
+     * <li>a fireball becomes an explosion mark $0604 with SOUND2 11, or, if what it hit was a
+     *     barrel it destroyed, sets the barrel off (the {@code bmi.w ao_f2} lands in the
+     *     rocket's code);</li>
+     * <li>a rocket goes off through ro_SetExplode, with sv_HitFlag set if it hit the player.</li>
+     * </ul>
+     *
+     * Objects added during the pass are not served until the next; the engine's table can serve
+     * one in the same pass when it lands in a later slot, which is not reproduced.
      */
     private void updateProjectiles() {
-        for (int i = projectiles.size() - 1; i >= 0; i--) {
+        int n = projectiles.size();
+        for (int i = 0; i < n; i++) {
             Projectile p = projectiles.get(i);
-            p.anim ^= 1;
-            if (--p.life <= 0) {
-                projectiles.remove(i);
-                continue;
+            switch (p.type) {
+                case Projectile.IMPACT:
+                case Projectile.DISCHARGE:
+                    if ((++p.counter & 3) == 3) {
+                        p.type = 0;
+                    }
+                    break;
+                case Projectile.EXPLOSION:
+                    if ((++p.counter & 7) == 7) {
+                        p.type = 0;
+                    }
+                    break;
+                case Projectile.FIREBALL:
+                case Projectile.ELECTRIC:
+                case Projectile.ROCKET:
+                    animateFlying(p);
+                    break;
+                default:
+                    break;
             }
-            if (p.isEffect()) {
-                continue;   // impact marks and explosions just animate in place
+        }
+        purgeObjects();
+    }
+
+    /** Drops the slots freed ({@code move #0,(a1)}) since the last look. */
+    private void purgeObjects() {
+        projectiles.removeIf(p -> p.type == 0);
+    }
+
+    private void animateFlying(Projectile p) {
+        int limit = (p.type == Projectile.FIREBALL) ? 60 : 40;
+        p.counter += 2;
+        if ((p.counter & 0x3e) == limit) {
+            p.type = 0;   // hit nothing
+            return;
+        }
+        p.anim ^= 1;
+        int hit = collide(p);
+        if (hit == 0) {
+            return;
+        }
+        switch (p.type) {
+            case Projectile.ELECTRIC:
+                toMark(p, Projectile.DISCHARGE, 0);
+                break;
+            case Projectile.FIREBALL:
+                if (hit < 0) {
+                    explode(p);
+                } else {
+                    toMark(p, Projectile.EXPLOSION, 4);
+                    playSoundAt(SoundTable.EXPLODE, p.x, p.y);
+                }
+                break;
+            default:
+                hitFlag = hit == 2;
+                explode(p);
+                hitFlag = false;
+                break;
+        }
+    }
+
+    private static void toMark(Projectile p, int type, int counter) {
+        p.type = type;
+        p.counter = counter;
+    }
+
+    /** .ColFound: a bullet that hit something stays as an impact mark at a random height. */
+    private void impactMark(Projectile p) {
+        p.height = (random() & 0x0c) >> 2;
+        toMark(p, Projectile.IMPACT, 0);
+    }
+
+    /**
+     * ro_DirTab. The first ring takes all eight entries, the four orthogonal ones at
+     * {@code 600/8} and the four diagonals at {@code 700/8} per axis; the second ring takes the
+     * first four again.
+     */
+    private static final int[][] RO_DIR = {
+            {75, 0}, {-75, 0}, {0, 75}, {0, -75},
+            {87, 87}, {87, -87}, {-87, -87}, {-87, 87},
+    };
+
+    /**
+     * ro_SetExplode. There is no splash radius and nothing flies: the rocket backs off an eighth
+     * of its step ({@code asr #3} of the per-sub-step vector), becomes explosion mark $0603 with
+     * SOUND2 11, and twelve fireball probes are resolved on the spot, each with Object_Collision
+     * and so each able to hurt, set alight or stop on whatever it meets:
+     *
+     * <ul>
+     * <li>four orthogonal, one call (600 units), a miss leaving mark $0601 where it stopped;</li>
+     * <li>four diagonal, one call (696 per axis), a miss leaving $0600;</li>
+     * <li>four orthogonal again, two calls (1200 units), a miss leaving $0600.</li>
+     * </ul>
+     *
+     * A probe that hits something is simply freed. Barrels act as walls throughout
+     * (eh_FirePos+4), and the player is only hurt when sv_HitFlag is clear — never by his own
+     * point-blank rocket or by a barrel his own shot set off.
+     *
+     * The released engine has a bug here: the second ring reloads the table with
+     * {@code lea ro_DirTab,a5} without {@code (pc)}, which in the shipped binary resolves to an
+     * absolute $7020A8 that is not the table, so its four vectors are whatever lies there. The
+     * port follows the evident intent and reuses the four orthogonal entries.
+     */
+    private void explode(Projectile p) {
+        barrelsShielded = true;
+        try {
+            p.x -= p.dx >> 3;
+            p.y -= p.dy >> 3;
+            toMark(p, Projectile.EXPLOSION, 3);
+            playSoundAt(SoundTable.EXPLODE, p.x, p.y);
+            int bx = p.x, by = p.y;
+            for (int i = 0; i < 8; i++) {
+                Projectile f = allocate(Projectile.FIREBALL, bx, by, RO_DIR[i][0], RO_DIR[i][1]);
+                if (f == null) {
+                    return;   // bra ro_End: a full table ends the whole blast
+                }
+                if (collide(f) == 0) {
+                    toMark(f, Projectile.EXPLOSION, i < 4 ? 1 : 0);
+                } else {
+                    f.type = 0;
+                }
             }
-            if (!advanceProjectile(p)) {
-                projectiles.remove(i);
+            for (int i = 0; i < 4; i++) {
+                Projectile f = allocate(Projectile.FIREBALL, bx, by, RO_DIR[i][0], RO_DIR[i][1]);
+                if (f == null) {
+                    return;
+                }
+                int hit = collide(f);
+                if (hit == 0) {
+                    hit = collide(f);
+                }
+                if (hit == 0) {
+                    toMark(f, Projectile.EXPLOSION, 0);
+                } else {
+                    f.type = 0;
+                }
+            }
+        } finally {
+            barrelsShielded = false;
+        }
+    }
+
+    /** Sets off a rocket with the given per-sub-step vector where it stands, for tests. */
+    Projectile detonate(int x, int y, int dx, int dy) {
+        Projectile p = allocate(Projectile.ROCKET, x, y, dx, dy);
+        if (p != null) {
+            explode(p);
+        }
+        purgeObjects();
+        return p;
+    }
+
+    /** oc_AddTab: the cell itself, then E, W, N, S, NW, NE, SW, SE. */
+    private static final int[][] OC_ADD = {
+            {0, 0}, {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {-1, 1}, {1, 1}, {-1, -1}, {1, -1},
+    };
+
+    /** Object_Collision's box around the player, {@code subi #250} and {@code addi #500}. */
+    public static final int PLAYER_HIT_BOX = 250;
+    /** A column stops an object inside a 190 box around the cell centre. */
+    public static final int COLUMN_SHOT_HALF = 190;
+
+    /**
+     * Object_Collision: eight sub-steps along the object's vector, each tested in this order.
+     *
+     * <ol>
+     * <li>{@code ori.l #$00010001}: both components forced odd, for the divisions below.</li>
+     * <li>A crossing of a cell boundary in X and in Y, each worked out to the point where it
+     *     meets the boundary — the last unit inside the old cell — and refused by br_ChkDoors on
+     *     that cell's face. A refused crossing leaves the object at that point: a wall hit.
+     *     When both are refused the X one wins: the code means to compare the Y hit's cell with
+     *     the object's own, but reads {@code 14(a1)}, which is the next slot's vector.</li>
+     * <li>Columns 1, 2 and 18 inside a 190 box. 18 is a barrel ({@link #hitBarrel}); the other
+     *     two are walls, as is a barrel to electricity or during an explosion.</li>
+     * <li>The player, within 250 on both axes, unless sv_HitFlag is set (oc_PlayerHit).</li>
+     * <li>An enemy within 200 on both axes, looked up through byte 7 of the nine cells around
+     *     (EnemyHitServe). Its state does not matter: a dying or burning one still stops it.</li>
+     * </ol>
+     *
+     * @return 0 nothing, 1 a wall, 2 the player, 3 an enemy, -1 a barrel it destroyed
+     */
+    private int collide(Projectile p) {
+        for (int s = 0; s < Projectile.SUBSTEPS; s++) {
+            p.dx |= 1;
+            p.dy |= 1;
+            int nx = p.x + p.dx, ny = p.y + p.dy;
+            if (nx < 0 || ny < 0 || nx >= 65536 || ny >= 65536) {
+                return 1;   // the 16 bit world would wrap; the port stops it at the edge
+            }
+
+            boolean wallX = false;
+            int hxX = 0, hxY = 0;
+            int x0 = p.x & 0xfc00, x1 = nx & 0xfc00;
+            if (x0 != x1) {
+                int bx = (x1 > x0) ? x1 - 1 : x0;
+                int dir = (bx - p.x >= 0) ? Level.EAST_DIR : Level.WEST_DIR;
+                int by = (bx - p.x) * p.dy / p.dx + p.y;
+                if (!passableAt(bx, by, dir)) {
+                    wallX = true;
+                    hxX = bx;
+                    hxY = by;
+                }
+            }
+            boolean wallY = false;
+            int hyX = 0, hyY = 0;
+            int y0 = p.y & 0xfc00, y1 = ny & 0xfc00;
+            if (y0 != y1) {
+                int by = (y1 > y0) ? y1 - 1 : y0;
+                int dir = (by - p.y >= 0) ? Level.NORTH_DIR : Level.SOUTH_DIR;
+                int bx = (by - p.y) * p.dx / p.dy + p.x;
+                if (!passableAt(bx, by, dir)) {
+                    wallY = true;
+                    hyX = bx;
+                    hyY = by;
+                }
+            }
+            if (wallX) {
+                p.x = hxX;
+                p.y = hxY;
+                return 1;
+            }
+            if (wallY) {
+                p.x = hyX;
+                p.y = hyY;
+                return 1;
+            }
+
+            p.x = nx;
+            p.y = ny;
+            int cx = nx >> 10, cy = ny >> 10;
+            int inX = nx & 1023, inY = ny & 1023;
+            int col = level.column(cx, cy);
+            if (col != 0 && (col == 18 || col < 3)
+                    && inX >= 512 - COLUMN_SHOT_HALF && inY >= 512 - COLUMN_SHOT_HALF
+                    && inX < 512 + COLUMN_SHOT_HALF && inY < 512 + COLUMN_SHOT_HALF) {
+                if (col != 18 || barrelsShielded || p.type == Projectile.ELECTRIC) {
+                    return 1;
+                }
+                return hitBarrel(p, cx, cy);
+            }
+
+            if (!hitFlag
+                    && p.x > posX - PLAYER_HIT_BOX && p.x <= posX + PLAYER_HIT_BOX
+                    && p.y > posY - PLAYER_HIT_BOX && p.y <= posY + PLAYER_HIT_BOX) {
+                hitPlayer(p);
+                return 2;
+            }
+
+            for (int[] a : OC_ADD) {
+                int ex = cx + a[0], ey = cy + a[1];
+                if (!Level.inside(ex, ey)) {
+                    continue;
+                }
+                Enemy e = enemyAt(level.enemyRef(ex, ey));
+                if (e != null && Math.abs(e.x - p.x) < Enemy.HIT_BOX
+                        && Math.abs(e.y - p.y) < Enemy.HIT_BOX) {
+                    enemyHitServe(e, p);
+                    return 3;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /** br_ChkDoors on the face of the cell holding the point (x, y). */
+    private boolean passableAt(int x, int y, int dir) {
+        int cx = ((x & 0xffff) >> 10) & 63, cy = ((y & 0xffff) >> 10) & 63;
+        return level.isPassable(cx, cy, dir);
+    }
+
+    /**
+     * The barrel ("beczka") branch of Object_Collision. Its damage is kept in oc_beczkas by map
+     * offset; at 30 it is cleared, the column and the item go from the map
+     * ({@code andi.b #%11100000} on byte 5 keeps a corpse, {@code andi.b #%11000000} on byte 6
+     * keeps the block flag), and the caller sets it off with ro_SetExplode.
+     *
+     * @return -1 when this hit destroyed it, else 1, a wall hit
+     */
+    private int hitBarrel(Projectile p, int cx, int cy) {
+        int offset = cx * 8 + cy * 512;
+        int slot = -1;
+        for (int i = 0; i < barrelOffset.length; i++) {
+            if (barrelOffset[i] == offset) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            for (int i = 0; i < barrelOffset.length; i++) {
+                if (barrelOffset[i] == 0) {
+                    slot = i;
+                    break;
+                }
+            }
+            if (slot < 0) {
+                slot = 0;
+            }
+            barrelOffset[slot] = offset;
+        }
+        barrelDamage[slot] += (p.type == Projectile.BULLET) ? 5 : 30;
+        if (barrelDamage[slot] < 30) {
+            return 1;
+        }
+        barrelOffset[slot] = 0;
+        barrelDamage[slot] = 0;
+        level.setColumn(cx, cy, 0);
+        level.removeItem(cx, cy);
+        geometryDirty = true;
+        return -1;
+    }
+
+    /**
+     * oc_PlayerHit: SCROLL 72, SOUND 13, EXCITE, the damage for the object's type (5, 25, 20,
+     * 40), four times its vector added to sv_AddMove, a turn of {@code asr.b #4} and two passes of
+     * interference.
+     */
+    private void hitPlayer(Projectile p) {
+        int damage = (p.type >= 0 && p.type < SHOT_DAMAGE.length) ? SHOT_DAMAGE[p.type] : 0;
+        log.add(text(72, "hit for " + damage));
+        playSound(SoundTable.PLAYER_HURT);
+        inventory.hurt(damage);
+        addMove(p.dx * 4, p.dy * 4);
+        jolt();
+    }
+
+    // ---------------------------------------------------------- enemy weapons
+
+    /** es_SND: the sample each enemy weapon fires with, 1-based as SOUND3 takes it. */
+    private static final int[] ES_SND = {0, 7, 25, 24, 5, 6, 3, 3};
+
+    /**
+     * es_EnemyShoot, at counter 68 of the wind-up. The species' weapon byte picks a sample from
+     * es_SND (SOUND3, so only within 7990 units) and a routine:
+     *
+     * <ul>
+     * <li>1, 2, 3 — es_HandGun with 1, 3 or 2 bullets: real objects, each spread by
+     *     {@code (r ^ r) asr.b #3} (-16..15), started 300 units ahead and walked through up to
+     *     20 Object_Collision calls (8000 units) at once. They can miss, strike another enemy,
+     *     or blow up a barrel, which ends the volley;</li>
+     * <li>4 — a fireball, 5 — a bolt, 6 — a rocket, spread by {@code asr.b #5} (-4..3), also
+     *     300 ahead, given their first collision call at once;</li>
+     * <li>0 and 7 fire nothing (7 still makes the launcher's sound).</li>
+     * </ul>
+     *
+     * There is no reload: the wind-up itself, and the roll in me_walk, are all the pacing.
+     */
+    private void enemyShoot(Enemy e) {
+        int weapon = level.enemyTemplates[e.species].weapon;
+        int sample = (weapon >= 0 && weapon < ES_SND.length) ? ES_SND[weapon] : 0;
+        if (sample != 0 && soundDistance2(e.x, e.y) != 0) {
+            playSoundAt(sample - 1, e.x, e.y);
+        }
+        switch (weapon) {
+            case 1:
+                enemyBullets(e, 1);
+                break;
+            case 2:
+                enemyBullets(e, 3);
+                break;
+            case 3:
+                enemyBullets(e, 2);
+                break;
+            case 4:
+                enemyFireball(e);
+                break;
+            case 5:
+            case 6:
+                enemyBolt(e, weapon == 5 ? Projectile.ELECTRIC : Projectile.ROCKET);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** es_PrepStruct0 / es_PrepStruct: the vector, and the start {@code ahead} vectors out. */
+    private Projectile launchFrom(int type, int x, int y, int len, int d6, int ahead) {
+        int[] v = rotate(len, d6 & 0x1fe);
+        return allocate(type, x + v[0] * ahead, y + v[1] * ahead, v[0], v[1]);
+    }
+
+    private void enemyBullets(Enemy e, int bullets) {
+        for (int i = 0; i < bullets; i++) {
+            int r1 = random(), r2 = random();
+            Projectile p = launchFrom(Projectile.BULLET, e.x, e.y, 400 / 8,
+                    256 - e.angle + asrByte(r1 ^ r2, 3), 6);
+            if (p == null) {
+                return;
+            }
+            int hit = 0;
+            for (int k = 0; k < 20 && hit == 0; k++) {
+                hit = collide(p);
+            }
+            if (hit < 0) {
+                explode(p);
+                return;
+            }
+            if (hit == 0) {
+                p.type = 0;
+            } else {
+                impactMark(p);
             }
         }
     }
 
-    /** @return false when the projectile is spent and should be removed */
-    private boolean advanceProjectile(Projectile p) {
-        for (int s = 0; s < PROJECTILE_SUBSTEPS; s++) {
-            int nx = p.x + p.dx / PROJECTILE_SUBSTEPS;
-            int ny = p.y + p.dy / PROJECTILE_SUBSTEPS;
-            if (nx < 0 || ny < 0 || nx >= 64 * Level.CELL_UNITS || ny >= 64 * Level.CELL_UNITS) {
-                return false;
-            }
-            int cx = p.cellX(), cy = p.cellY();
-            int ncx = nx / Level.CELL_UNITS, ncy = ny / Level.CELL_UNITS;
-            if (ncx != cx && !level.isPassable(cx, cy, ncx > cx ? Level.EAST_DIR : Level.WEST_DIR)) {
-                return impact(p);
-            }
-            if (ncy != cy && !level.isPassable(ncx, cy, ncy > cy ? Level.NORTH_DIR : Level.SOUTH_DIR)) {
-                return impact(p);
-            }
-            p.x = nx;
-            p.y = ny;
+    /** es_Flamer: a hit on the first call is explosion mark $0603, without a sound. */
+    private void enemyFireball(Enemy e) {
+        if (!slotFree()) {
+            return;
+        }
+        Projectile p = launchFrom(Projectile.FIREBALL, e.x, e.y, 400 / 8,
+                256 - e.angle + asrByte(random(), 5), 6);
+        int hit = collide(p);
+        if (hit < 0) {
+            explode(p);
+        } else if (hit != 0) {
+            toMark(p, Projectile.EXPLOSION, 3);
+        }
+    }
 
-            if (!p.fromPlayer
-                    && Math.abs(posX - p.x) < Enemy.RADIUS && Math.abs(posY - p.y) < Enemy.RADIUS) {
-                hitPlayer(p);
-                return impact(p);
+    /** es_Bolter and es_Launcher. */
+    private void enemyBolt(Enemy e, int type) {
+        if (!slotFree()) {
+            return;
+        }
+        Projectile p = launchFrom(type, e.x, e.y, 600 / 8,
+                256 - e.angle + asrByte(random(), 5), 4);
+        int hit = collide(p);
+        if (hit == 0) {
+            return;
+        }
+        if (type == Projectile.ELECTRIC) {
+            toMark(p, Projectile.DISCHARGE, 0);
+        } else {
+            hitFlag = hit == 2;
+            explode(p);
+            hitFlag = false;
+        }
+    }
+
+    /** Applies damage to an enemy directly, as EnemyHitServe's subtraction does. */
+    public void damageEnemy(Enemy e, int amount) {
+        e.energy -= amount;
+        if (e.energy < 0) {
+            kill(e);
+        } else {
+            hurtEnemy(e);
+        }
+    }
+
+    /**
+     * eh_stillOk: two passes of recoil (the counter goes 72, 76, 80, see {@link #meHited}), and
+     * three times in four a grunt, SOUND 18 + (random &amp; 3) unless that is 3, which is en2,
+     * en3 or en4.
+     */
+    private void hurtEnemy(Enemy e) {
+        e.state = Enemy.HIT;
+        e.counter = Enemy.HIT_COUNTER;
+        int r = rnd.nextInt(4);
+        if (r != 3) {
+            playSoundAt(SoundTable.ENEMY_ROAR_FIRST + r, e.x, e.y);
+        }
+    }
+
+    /** sv_NrKilled: enemies killed on this level, counted as each one's corpse is laid down. */
+    private int killed;
+
+    public int enemiesKilled() {
+        return killed;
+    }
+
+    /**
+     * EnemyHitServe's kill: state 2 with the counter at 72. The enemy keeps its slot and its
+     * cell; {@link #meKilled} takes it down over the next three passes.
+     */
+    private void kill(Enemy e) {
+        // me_killed: SOUND 17 + (random & 3), en1 to en4
+        playSoundAt(SoundTable.ENEMY_ROAR_FIRST - 1 + rnd.nextInt(4), e.x, e.y);
+        e.state = Enemy.KILLED;
+        e.counter = Enemy.HIT_COUNTER;
+        log.add("enemy down");
+    }
+
+    /**
+     * eh_Burning: state 3, counter 80, and the energy word becomes the burn's countdown, 55. The
+     * fire sample starts looping on channel 2 at volume 0, and this enemy now owns it.
+     */
+    private void startBurning(Enemy e) {
+        e.state = Enemy.BURNING;
+        e.counter = Enemy.BURN_COUNTER;
+        e.energy = Enemy.BURN_ENERGY;
+        fireOwner = e;
+        fireVolume = 0;
+    }
+
+    /**
+     * EnemyHitServe, for any object that reaches an enemy, the player's or another enemy's.
+     *
+     * Nothing happens to one already dying or burning. Otherwise the species' mask decides
+     * whether the type hurts at all (5 bullet, 25 fireball, 20 electricity, 40 rocket); if it
+     * does, the low bytes of the object's vector become the knockback, the enemy turns to face
+     * the way the <em>player</em> is looking reversed — whoever fired — and the damage comes off.
+     * At 0 it is still standing; below, a fireball sets it burning and anything else kills it
+     * and splashes blood ({@link #splashBlood}).
+     */
+    private void enemyHitServe(Enemy e, Projectile p) {
+        if (e.state == Enemy.KILLED || e.state == Enemy.BURNING) {
+            return;
+        }
+        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
+        int type = p.type;
+        if (type != SHOT_BULLET && type != SHOT_FIREBALL && type != SHOT_ELECTRIC
+                && type != SHOT_ROCKET) {
+            return;
+        }
+        if (!stats.vulnerableTo(type)) {
+            return;
+        }
+        int damage = SHOT_DAMAGE[type];
+        e.knockX = (byte) p.dx;
+        e.knockY = (byte) p.dy;
+        e.angle = (angle + 256) & 0x1fe;
+        e.energy -= damage;
+        if (e.energy >= 0) {
+            hurtEnemy(e);
+        } else if (damage == 25) {
+            startBurning(e);
+        } else {
+            kill(e);
+            splashBlood(e, p);
+        }
+    }
+
+    /**
+     * EnemyHitServe's blood. The face of the enemy's cell the shot was travelling towards — N or
+     * S when {@code |dy| >= |dx|}, else E or W — gets stain $40 or $80 at random, and each face
+     * either side of it gets $C0 three times in four. Only walls take it: not an empty face, not
+     * the door values 30..41, not 48..55.
+     */
+    private void splashBlood(Enemy e, Projectile p) {
+        int cx = e.cellX(), cy = e.cellY();
+        int dir;
+        if (Math.abs(p.dy) >= Math.abs(p.dx)) {
+            dir = p.dy >= 0 ? Level.NORTH_DIR : Level.SOUTH_DIR;
+        } else {
+            dir = p.dx >= 0 ? Level.EAST_DIR : Level.WEST_DIR;
+        }
+        int stain = ((random() & 1) == 0) ? 1 : 2;
+        if (takesBlood(cx, cy, dir)) {
+            level.setBlood(cx, cy, dir, stain);
+        }
+        for (int side : new int[]{(dir + 3) & 3, (dir + 1) & 3}) {
+            if ((random() & 3) != 0 && takesBlood(cx, cy, side)) {
+                level.setBlood(cx, cy, side, 3);
             }
-            Enemy hit = enemyNear(p.x, p.y, p.ownerSlot);
-            if (hit != null) {
-                hitEnemy(hit, p.type);
-                return impact(p);
+        }
+        geometryDirty = true;
+    }
+
+    private boolean takesBlood(int x, int y, int dir) {
+        int w = level.wallValue(x, y, dir) & 0x3e;
+        return w != 0 && !(w >= 30 && w < 42) && !(w >= 48 && w < 56);
+    }
+
+    /**
+     * Line of sight from a point to another, as {@link #lineOfSight} with the distance worked
+     * out the way me_walk does.
+     */
+    public boolean canShoot(int fromX, int fromY, int toX, int toY) {
+        long dx = toX - fromX, dy = toY - fromY;
+        return lineOfSight(fromX, fromY, toX, toY, isqrt(dx * dx + dy * dy));
+    }
+
+    /**
+     * CanShoot, transcribed. The line is cut into {@code dist / 1024 + 1} equal steps
+     * ({@code divs}), each under a cell long, and every step that changes cell is checked with
+     * cs_ChkDoors on the faces it crosses. Wall 52, the transparent one, does not block. A
+     * diagonal step, which crosses a corner, looks at the four faces meeting there — the old
+     * cell's two and the neighbours' two — and is only refused when at least two are shut
+     * (cs_ChkDoors2).
+     */
+    private boolean lineOfSight(int fromX, int fromY, int toX, int toY, int dist) {
+        int sx = (short) (toX - fromX), sy = (short) (toY - fromY);
+        int n = (dist & 0xffff) >> 10;
+        if (n != 0) {
+            sx /= n + 1;
+            sy /= n + 1;
+        }
+        int x = fromX, y = fromY;
+        for (int i = 0; i <= n; i++) {
+            int ocx = (x >> 10) & 63, ocy = (y >> 10) & 63;
+            x = (x + sx) & 0xffff;
+            y = (y + sy) & 0xffff;
+            int ncx = (x >> 10) & 63, ncy = (y >> 10) & 63;
+            int h = Integer.compare(ncx, ocx);
+            int v = Integer.compare(ncy, ocy);
+            if (h == 0 && v == 0) {
+                continue;
+            }
+            int hDir = h > 0 ? Level.EAST_DIR : Level.WEST_DIR;
+            int vDir = v > 0 ? Level.NORTH_DIR : Level.SOUTH_DIR;
+            if (v == 0) {
+                if (sightShut(ocx, ocy, hDir)) {
+                    return false;
+                }
+            } else if (h == 0) {
+                if (sightShut(ocx, ocy, vDir)) {
+                    return false;
+                }
+            } else {
+                int shut = 0;
+                shut += sightShut(ocx, ocy, vDir) ? 1 : 0;
+                shut += sightShut(ocx, ocy, hDir) ? 1 : 0;
+                shut += sightShut(ocx + Level.DX[hDir], ocy, vDir) ? 1 : 0;
+                shut += sightShut(ocx, ocy + Level.DY[vDir], hDir) ? 1 : 0;
+                if (shut >= 2) {
+                    return false;
+                }
             }
         }
         return true;
     }
 
-    /**
-     * What an object turns into when it lands. A rocket detonates, which ro_SetExplode does by
-     * replacing it with an explosion mark and throwing eight fireballs outwards — the splash
-     * damage is those fireballs, not a radius check.
-     *
-     * @return false, so the caller removes the original object
-     */
-    private boolean impact(Projectile p) {
-        if (p.type == Projectile.ROCKET) {
-            explode(p.x, p.y);
-        } else {
-            projectiles.add(new Projectile(
-                    p.type == Projectile.ELECTRIC ? Projectile.DISCHARGE : Projectile.IMPACT,
-                    p.x, p.y));
+    /** cs_ChkDoors: anything but nothing, an open door, wall 52 or a broken door blocks. */
+    private boolean sightShut(int x, int y, int dir) {
+        if (!Level.inside(x, y)) {
+            return false;
         }
-        return false;
-    }
-
-    /** ro_DirTab: four cardinal directions then four diagonals, all at projectile speed. */
-    private void explode(int x, int y) {
-        projectiles.add(new Projectile(Projectile.EXPLOSION, x, y));
-        playSoundAt(SoundTable.EXPLODE, x, y);
-        for (int i = 0; i < 8; i++) {
-            Projectile f = new Projectile(Projectile.FIREBALL, x, y, i * 64, -1, false);
-            projectiles.add(f);
-        }
-    }
-
-    private void hitPlayer(Projectile p) {
-        int damage = SHOT_DAMAGE[Math.min(p.type, SHOT_DAMAGE.length - 1)];
-        inventory.hurt(damage);
-        playSound(SoundTable.PLAYER_HURT);
-        log.add(text(72, "hit for " + damage));
-        jolt();
-    }
-
-    private Enemy enemyNear(int x, int y, int exceptSlot) {
-        for (Enemy e : enemies) {
-            if (e.isDead() || e.slot == exceptSlot) {
-                continue;
-            }
-            if (Math.abs(e.x - x) < Enemy.RADIUS && Math.abs(e.y - y) < Enemy.RADIUS) {
-                return e;
-            }
-        }
-        return null;
-    }
-
-    /** Puts an object into flight, as the flamer, bolter and launcher branches do. */
-    private void spawnProjectile(int type, int x, int y, int angle, int ownerSlot,
-                                 boolean fromPlayer) {
-        if (projectiles.size() >= 30) {
-            return;   // the engine's table is 30 slots and simply drops the shot when full
-        }
-        projectiles.add(new Projectile(type, x, y, angle, ownerSlot, fromPlayer));
-    }
-
-    /**
-     * An enemy shot landing on the player. oc_PlayerHit uses the same damage table as
-     * EnemyHitServe does for enemies, keyed on the projectile type the enemy's weapon fires:
-     * 5 for a bullet, 25 for a fireball, 20 for electricity, 40 for a rocket.
-     *
-     * The original spawns a travelling object and only hurts the player when it arrives. Here the
-     * shot resolves at once, so the enemy is given a reload delay to stand in for the flight time.
-     * Without it a room full of enemies empties a full energy bar in about two seconds.
-     */
-    private void fire(Enemy e) {
-        e.reload = ENEMY_RELOAD;
-        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
-        int type = enemyShotType(stats.weapon);
-        playSoundAt(SoundTable.fireSound(Math.max(1, stats.weapon)), e.x, e.y);
-
-        if (type != SHOT_BULLET) {
-            spawnProjectile(type, e.x, e.y, e.angle, e.slot, false);
-            return;
-        }
-        // es_HandGun resolves at once, like the player's
-        if (!canShoot(e.x, e.y, posX, posY)) {
-            return;
-        }
-        int damage = SHOT_DAMAGE[type];
-        inventory.hurt(damage);
-        playSound(SoundTable.PLAYER_HURT);
-        log.add(text(72, "hit for " + damage));
-        jolt();
-    }
-
-    /** Maps an enemy's weapon number onto the projectile type it fires, as es_EnemyShoot does. */
-    private static int enemyShotType(int weapon) {
-        switch (weapon) {
-            case 4: return SHOT_FIREBALL;
-            case 5: return SHOT_ELECTRIC;
-            case 6: return SHOT_ROCKET;
-            default: return SHOT_BULLET;
-        }
-    }
-
-    /** Applies damage to an enemy, from the player's weapons. */
-    public void damageEnemy(Enemy e, int amount) {
-        e.energy -= amount;
-        if (e.energy <= 0) {
-            kill(e);
-        } else {
-            e.state = Enemy.HIT;
-            e.counter = 8;
-        }
-    }
-
-    private void kill(Enemy e) {
-        e.state = Enemy.KILLED;
-        if (level.enemyRef(e.cellX(), e.cellY()) == e.slot) {
-            level.setEnemyRef(e.cellX(), e.cellY(), 0);
-        }
-        log.add("enemy down");
-    }
-
-    /**
-     * Line of sight between two world positions.
-     *
-     * This is a grid walk rather than a transcription of CanShoot: it steps cell by cell from the
-     * shooter to the target and refuses the first face that is shut. The original unrolls the same
-     * idea per quadrant; the observable result is the same and this is far easier to follow.
-     */
-    public boolean canShoot(int fromX, int fromY, int toX, int toY) {
-        int cx = fromX / Level.CELL_UNITS, cy = fromY / Level.CELL_UNITS;
-        int tx = toX / Level.CELL_UNITS, ty = toY / Level.CELL_UNITS;
-        double dx = toX - fromX, dy = toY - fromY;
-        double len = Math.max(Math.abs(dx), Math.abs(dy));
-        if (len < 1) {
-            return true;
-        }
-        double x = fromX, y = fromY;
-        double sx = dx / len * 64, sy = dy / len * 64;
-        for (int guard = 0; guard < 4096; guard++) {
-            if (cx == tx && cy == ty) {
-                return true;
-            }
-            x += sx;
-            y += sy;
-            int ncx = (int) (x / Level.CELL_UNITS);
-            int ncy = (int) (y / Level.CELL_UNITS);
-            if (!Level.inside(ncx, ncy)) {
-                return false;
-            }
-            if (ncx != cx) {
-                int dir = (ncx > cx) ? Level.EAST_DIR : Level.WEST_DIR;
-                if (!level.isPassable(cx, cy, dir)) {
-                    return false;
-                }
-                cx = ncx;
-            }
-            if (ncy != cy) {
-                int dir = (ncy > cy) ? Level.NORTH_DIR : Level.SOUTH_DIR;
-                if (!level.isPassable(cx, cy, dir)) {
-                    return false;
-                }
-                cy = ncy;
-            }
-        }
-        return false;
+        int v = level.wallValue(x, y, dir) & 0x3e;
+        return !(v == 0 || v == 32 || v == 38 || v == 52 || v == 54);
     }
 
     // -------------------------------------------------------------- weapons
@@ -1404,24 +2757,36 @@ public final class GameState {
 
     private static final int[] SHOT_DAMAGE = {0, 5, 0, 25, 20, 40};
 
-    /** Damage type each weapon slot delivers; slot 0 is the bare hand. */
-    private static final int[] WEAPON_SHOT = {
-            0, SHOT_BULLET, SHOT_BULLET, SHOT_BULLET, SHOT_FIREBALL, SHOT_ELECTRIC, SHOT_ROCKET,
-    };
-    /** Pellets per trigger pull; only the shotgun fires more than one. */
-    private static final int[] WEAPON_PELLETS = {0, 1, 5, 1, 1, 1, 1};
+    /** Bullets per trigger pull: rm_AmmoLoop runs 3 times for the shotgun, twice for the MG. */
+    private static final int[] WEAPON_PELLETS = {0, 1, 3, 2, 1, 1, 1};
 
-    /** Step length and step count of a shot, from the hitscan loop in rm_HandGunUsed. */
-    private static final int SHOT_STEP = 400;
-    private static final int SHOT_STEPS = 20;
+    /**
+     * Collision calls per bullet, 400 units each: rm_HandGunUsed does 20 ("up to 8000"), the
+     * shotgun and machinegun's rm_AmmoLoop 25 ("up to 10000").
+     */
+    private static final int[] WEAPON_SHOT_STEPS = {0, 20, 25, 25, 0, 0, 0};
+
+    private static final int FLAMER_SLOT = 4;
+    private static final int BOLTER_SLOT = 5;
+    private static final int LAUNCHER_SLOT = 6;
+
+    /**
+     * sv_Flag+8, the launcher's reload: rm_LauncherUsed sets it to 5 and MAIN_LOOP takes one off
+     * after Check_RMB every pass, so a rocket can go every fifth pass. Asking sooner prints
+     * SCROLL 68 and nothing else.
+     */
+    private int launcherReload;
+
+    public int launcherReload() {
+        return launcherReload;
+    }
 
     /**
      * The fire action, i.e. Check_RMB with a weapon in hand. With the bare hand it falls through
      * to {@link #use()}, which is what the engine does with sv_SpaceOn.
      *
-     * Shots are resolved immediately rather than as travelling objects: rm_HandGunUsed runs its
-     * whole collision loop in the frame the trigger is pulled. Only slow objects (flames, rockets
-     * in flight) live in sv_ObjectTab across frames, and those are not modelled yet.
+     * sv_HitFlag is held for the whole shot, so nothing the player fires can hit him on the way
+     * out, nor can a barrel he sets off.
      *
      * @return true when a shot was actually fired
      */
@@ -1430,8 +2795,15 @@ public final class GameState {
         if (w == Inventory.HAND) {
             return use();
         }
+        if (Inventory.isCard(w)) {
+            return useCard(w - Inventory.FIRST_CARD_SLOT);
+        }
         if (!inventory.owned[w]) {
             log.add("you have no " + Inventory.WEAPON_NAMES[w]);
+            return false;
+        }
+        if (w == LAUNCHER_SLOT && launcherReload != 0) {
+            log.add(text(68, "reloading"));
             return false;
         }
         if (inventory.ammo[w] >= 0) {
@@ -1439,106 +2811,125 @@ public final class GameState {
             log.add(text(TextTable.OUT_OF_AMMO, "no ammunition"));
             return false;
         }
-        if (inventory.condition[w] <= 0) {
+        // DamageWeapon wears the weapon down by 0 or 1 first, and the shot is refused when that
+        // leaves it at 0: a weapon at 1 that wears out does not fire.
+        inventory.condition[w] = Math.max(0, inventory.condition[w] - rnd.nextInt(2));
+        if (inventory.condition[w] == 0) {
             playSound(SoundTable.NO_AMMO);
             log.add(text(TextTable.WEAPON_DAMAGED,
                     "the " + Inventory.WEAPON_NAMES[w] + " is broken"));
             return false;
         }
-        // DamageWeapon wears the weapon down by 0 or 1 per shot.
-        inventory.condition[w] = Math.max(0, inventory.condition[w] - rnd.nextInt(2));
         inventory.ammo[w]++;
         playSound(SoundTable.fireSound(w));
-
-        int type = WEAPON_SHOT[w];
-        if (type != SHOT_BULLET) {
-            // flamer, bolter and launcher put an object into sv_ObjectTab instead of resolving now
-            spawnProjectile(type, posX, posY, angle, 0, true);
-            return true;
+        if (w == LAUNCHER_SLOT) {
+            launcherReload = 5;
         }
 
-        int pellets = WEAPON_PELLETS[w];
-        int hits = 0;
-        for (int i = 0; i < pellets; i++) {
-            // The shotgun sprays; everything else fires straight down the middle.
-            int spread = (pellets == 1) ? 0 : rnd.nextInt(17) - 8;
-            if (shoot((angle + spread) & 511, type)) {
-                hits++;
+        hitFlag = true;
+        try {
+            switch (w) {
+                case FLAMER_SLOT:
+                    playerObject(Projectile.FIREBALL);
+                    break;
+                case BOLTER_SLOT:
+                    playerObject(Projectile.ELECTRIC);
+                    break;
+                case LAUNCHER_SLOT:
+                    playerObject(Projectile.ROCKET);
+                    break;
+                default:
+                    playerBullets(WEAPON_PELLETS[w], WEAPON_SHOT_STEPS[w], w != 1);
+                    break;
             }
-        }
-        if (hits > 0) {
-            log.add(hits == 1 ? "hit" : hits + " hits");
+        } finally {
+            hitFlag = false;
+            purgeObjects();
         }
         return true;
     }
 
     /**
-     * Walks a shot out from the player until it meets a wall or an enemy.
-     *
-     * @return true when it hit a living enemy
+     * rm_HandGunUsed and rm_AmmoLoop: each bullet is an object started at the player and run
+     * through all its collision calls at once. The shotgun and the machinegun spread theirs by
+     * {@code (random &amp; $e0) asr.b #4}, an even -8..6 added to the rotate index. A miss frees
+     * the slot, a hit leaves an impact mark, and a barrel destroyed goes off and ends the volley.
      */
-    private boolean shoot(int shotAngle, int type) {
-        double dx = forwardX(shotAngle) * SHOT_STEP;
-        double dy = forwardY(shotAngle) * SHOT_STEP;
-        double x = posX, y = posY;
-        int cx = cellX(), cy = cellY();
-
-        for (int step = 0; step < SHOT_STEPS; step++) {
-            x += dx;
-            y += dy;
-            if (x < 0 || y < 0 || x >= 64 * Level.CELL_UNITS || y >= 64 * Level.CELL_UNITS) {
-                return false;
+    private void playerBullets(int bullets, int steps, boolean spread) {
+        for (int i = 0; i < bullets; i++) {
+            int d6 = 256 - angle;
+            if (spread) {
+                d6 += asrByte(random() & 0xe0, 4);
             }
-            int ncx = (int) (x / Level.CELL_UNITS);
-            int ncy = (int) (y / Level.CELL_UNITS);
-            if (ncx != cx) {
-                if (!level.isPassable(cx, cy, ncx > cx ? Level.EAST_DIR : Level.WEST_DIR)) {
-                    return false;
-                }
-                cx = ncx;
+            Projectile p = launchFrom(Projectile.BULLET, posX, posY, 400 / 8, d6, 0);
+            if (p == null) {
+                return;
             }
-            if (ncy != cy) {
-                if (!level.isPassable(cx, cy, ncy > cy ? Level.NORTH_DIR : Level.SOUTH_DIR)) {
-                    return false;
-                }
-                cy = ncy;
+            int hit = 0;
+            for (int k = 0; k < steps && hit == 0; k++) {
+                hit = collide(p);
             }
-            Enemy hit = enemyNear((int) x, (int) y, -1);
-            if (hit != null) {
-                hitEnemy(hit, type);
-                return true;
+            if (hit < 0) {
+                explode(p);
+                return;
+            }
+            if (hit == 0) {
+                p.type = 0;
+            } else {
+                impactMark(p);
             }
         }
-        return false;
     }
 
     /**
-     * EnemyHitServe: a species only takes damage from the types its vulnerability mask allows,
-     * and a fireball that finishes it off leaves it burning rather than simply dead.
+     * rm_FlamerUsed, rm_BolterUsed and rm_LauncherUsed. PrepareStruct adds
+     * {@code random &amp; 6}, 0..6, to the rotate index, and the first Object_Collision call is
+     * made there and then. A miss leaves the object in flight. A hit is point blank:
+     *
+     * <ul>
+     * <li>flamer — explosion mark $0603 (a barrel it destroyed goes off instead), 5 energy;</li>
+     * <li>bolter — discharge mark $0200, 1 energy;</li>
+     * <li>launcher — ro_SetExplode, 5 energy;</li>
+     * </ul>
+     *
+     * each with two passes of interference, EXCITE and a recoil in sv_LastMove of 190 units
+     * (250 for the launcher) along {@code -sv_Angle} ({@link #lastMove}).
      */
-    private void hitEnemy(Enemy e, int type) {
-        if (e.state == Enemy.KILLED || e.state == Enemy.BURNING) {
+    private void playerObject(int type) {
+        int len = (type == Projectile.FIREBALL) ? 400 / 8 : 600 / 8;
+        Projectile p = launchFrom(type, posX, posY, len, 256 - angle + (random() & 6), 0);
+        if (p == null) {
             return;
         }
-        Level.EnemyTemplate stats = level.enemyTemplates[e.species];
-        if (!stats.vulnerableTo(type)) {
-            log.add("no effect");
+        int hit = collide(p);
+        if (hit == 0) {
             return;
         }
-        // the enemy turns to face whoever shot it
-        e.angle = (angle + 256) & 511;
-        e.energy -= SHOT_DAMAGE[type];
-        playSoundAt(SoundTable.ENEMY_ROAR_FIRST + rnd.nextInt(SoundTable.ENEMY_ROAR_COUNT),
-                e.x, e.y);
-        if (e.energy > 0) {
-            e.state = Enemy.HIT;
-            e.counter = 8;
-        } else if (type == SHOT_FIREBALL) {
-            e.state = Enemy.BURNING;
-            e.energy = 20;
-        } else {
-            kill(e);
+        switch (type) {
+            case Projectile.FIREBALL:
+                if (hit < 0) {
+                    explode(p);   // .rm_beczka3: no point-blank cost
+                    return;
+                }
+                toMark(p, Projectile.EXPLOSION, 3);
+                pointBlank(5, 190);
+                break;
+            case Projectile.ELECTRIC:
+                toMark(p, Projectile.DISCHARGE, 0);
+                pointBlank(1, 190);
+                break;
+            default:
+                explode(p);
+                pointBlank(5, 250);
+                break;
         }
+    }
+
+    private void pointBlank(int energy, int recoil) {
+        lastMove(recoil, (-angle) & 0x1fe);
+        szum();
+        inventory.hurt(energy);
+        heart.excite();
     }
 
     // ------------------------------------------------------------- triggers
@@ -1565,48 +2956,146 @@ public final class GameState {
     }
 
     /**
-     * The "use" action, i.e. what Check_RMB does with an empty hand: if the player faces a switch,
-     * find its record in the event stream and run the commands.
+     * rm_HandUsed, what the bare hand does: switches go in and out, and everything else gets a
+     * line on the message bar saying what the player is looking at.
      *
-     * @return true when something was actually triggered
+     * @return true when a switch was used
      */
     public boolean use() {
         int cx = cellX(), cy = cellY(), dir = facingDir();
-        if (!level.isSwitch(cx, cy, dir)) {
-            log.add(text(TextTable.SEE_NOTHING, "nothing to use here"));
+        int face = level.wallValue(cx, cy, dir);
+        if (face == 0) {
+            // nothing on the face: look into the cell instead
+            if (level.enemyRef(cx, cy) != 0) {
+                log.add(text(70, "an enemy"));
+            } else if (level.item(cx, cy) != 0) {
+                log.add(text(43, "an item"));
+            } else if (level.corpse(cx, cy) != 0) {
+                log.add(text(46, "a corpse"));
+            } else if (level.column(cx, cy) != 0) {
+                log.add(level.column(cx, cy) < 3
+                        ? text(45, "a column in the way")
+                        : text(TextTable.SEE_COLUMN, "a column"));
+            } else {
+                log.add(text(TextTable.SEE_NOTHING, "nothing here"));
+            }
             return false;
         }
-        for (Level.Trigger t : level.triggers()) {
-            if (t.cellX == cx && t.cellY == cy && t.dir == dir) {
-                toggleSwitch(cx, cy, dir);
-                playSound(SoundTable.SWITCH);
-                runCommands(t);
-                return true;
-            }
+        int wall = face & 0x3e;
+        switch (wall) {
+            case 54:
+                log.add(text(TextTable.SEE_NOTHING, "nothing here"));
+                return false;
+            case 30: case 36:
+                log.add(text(TextTable.DOOR_SHUT, "a shut door"));
+                return false;
+            case 32: case 38:
+                log.add(text(TextTable.DOOR_OPEN, "an open door"));
+                return false;
+            case 34: case 40:
+                log.add(text(TextTable.DOOR_ANIMATING, "the door is moving"));
+                return false;
+            case 44:
+                return serveSwitch(cx, cy, dir, 46, false);
+            case 46:
+                return serveSwitch(cx, cy, dir, 44, true);
+            default:
+                break;
         }
-        log.add(text(TextTable.SWITCH_STUCK, "switch has no wiring"));
+        int slot = level.wallPlaque(cx, cy, dir);
+        if (slot == 1) {
+            log.add(text(55, "an empty card slot"));
+        } else if (slot == 2) {
+            log.add(text(56, "a full card slot"));
+        } else if (level.wallBlood(cx, cy, dir) != 0) {
+            log.add(text(48, "blood on the wall"));
+        } else {
+            log.add(text(TextTable.SEE_WALL, "a wall"));
+        }
         return false;
     }
 
-    /** Switch out is cell value 44, switch in is 46; using one flips it. */
-    private void toggleSwitch(int x, int y, int dir) {
-        int v = level.wallValue(x, y, dir);
-        int mirror = v & 1;
-        int base = v & 62;
-        level.setWallValue(x, y, dir, (base == 44 ? 46 : 44) | mirror);
+    /**
+     * rm_ServeSwitch. The switch flips whether or not the map has a record for it; a switch going
+     * in runs the record's first command list, one coming out runs the list after the {@code -2}.
+     *
+     * It refuses with SCROLL 54, leaving the switch where it is, while either channel is moving
+     * a priority door or has one queued ({@code tst sv_DoorFlag1+22}, {@code cmpi #-1,+26}).
+     *
+     * @return true when the switch moved
+     */
+    private boolean serveSwitch(int cx, int cy, int dir, int newValue, boolean comingOut) {
+        for (DoorSlot s : doors) {
+            if (s.prior || s.queuedCount > 0) {
+                log.add(text(TextTable.SWITCH_STUCK, "IT DOESN'T MOVE! TRY AGAIN!"));
+                return false;
+            }
+        }
+        log.add(text(TextTable.SWITCH_USED, "switch used"));
+        playSound(SoundTable.SWITCH);
+        int mirror = level.wallValue(cx, cy, dir) & 1;
+        level.setWallValue(cx, cy, dir, newValue | mirror);
+        geometryDirty = true;
+        for (Level.Trigger t : level.triggers()) {
+            if (!t.isCardReader() && t.cellX == cx && t.cellY == cy && t.dir == dir) {
+                runCommands(t, comingOut);
+                break;
+            }
+        }
+        return true;
     }
 
-    private void runCommands(Level.Trigger t) {
-        int n = 0;
-        for (Level.Command c : t.commands) {
-            if (c.onRelease) {
-                continue; // press actions only; release actions need the held-button model
-            }
-            apply(c);
-            n++;
+    /**
+     * rm_CardUsed: firing a card held in hand at a card reader on the face ahead. The reader's
+     * slot must be empty (1) and a record for this cell must want this colour; the card is used
+     * up, the slot shows full (2), and the record's commands run.
+     *
+     * @param colour 0 red, 1 green, 2 blue
+     */
+    private boolean useCard(int colour) {
+        if (!inventory.hasCard(colour)) {
+            log.add(text(TextTable.NO_CARD, "you have no such card"));
+            return false;
         }
-        log.add(text(TextTable.SWITCH_USED,
-                "switch fired " + n + " command" + (n == 1 ? "" : "s")));
+        int cx = cellX(), cy = cellY(), dir = facingDir();
+        int slot = level.wallPlaque(cx, cy, dir);
+        if (slot == 2) {
+            log.add(text(TextTable.SLOT_FULL, "the slot is full"));
+            return false;
+        }
+        if (slot != 1) {
+            log.add(text(57, "nowhere to put the card"));
+            return false;
+        }
+        boolean wrongColour = false;
+        for (Level.Trigger t : level.triggers()) {
+            if (!t.isCardReader() || t.cellX != cx || t.cellY != cy) {
+                continue;
+            }
+            if (t.cardColour != colour + 1) {
+                wrongColour = true;
+                continue;
+            }
+            inventory.cards[colour]++;
+            level.setPlaque(cx, cy, dir, 2);
+            geometryDirty = true;
+            log.add(text(62, "the card fits"));
+            playSound(SoundTable.CARD);
+            runCommands(t, false);
+            return true;
+        }
+        log.add(wrongColour ? text(TextTable.WRONG_COLOUR, "wrong colour")
+                : text(60, "the slot is dead"));
+        return false;
+    }
+
+    /** rm_CommandLoop over one of a record's two lists; it stops at the first negative word. */
+    private void runCommands(Level.Trigger t, boolean secondList) {
+        for (Level.Command c : t.commands) {
+            if (c.onRelease == secondList) {
+                apply(c);
+            }
+        }
     }
 
     private void apply(Level.Command c) {
@@ -1616,10 +3105,10 @@ public final class GameState {
         }
         switch (c.code) {
             case Level.Command.OPEN_DOOR:
-                forceDoor(x, y, d, true);
+                fixDoor(x, y, d, true);
                 break;
             case Level.Command.CLOSE_DOOR:
-                forceDoor(x, y, d, false);
+                fixDoor(x, y, d, false);
                 break;
             case Level.Command.SET_BLOCK:
                 level.setBlocked(x, y, true);
@@ -1641,21 +3130,6 @@ public final class GameState {
                 break;
             default:
                 break;
-        }
-    }
-
-    /**
-     * rm_OpenDoor / rm_CloseDoor: a command driven door is set directly rather than animated by
-     * the two automatic channels, and it also flips the face on the far side.
-     */
-    private void forceDoor(int x, int y, int dir, boolean open) {
-        int v = level.wallValue(x, y, dir) & 62;
-        int type = (v >= 36 && v <= 41) ? 2 : 1;
-        int target = open ? (type == 1 ? 32 : 38) : (type == 1 ? 30 : 36);
-        setFace(x, y, dir, target);
-        int nx = x + Level.DX[dir], ny = y + Level.DY[dir];
-        if (Level.inside(nx, ny)) {
-            setFace(nx, ny, Level.OPPOSITE[dir], target);
         }
     }
 }

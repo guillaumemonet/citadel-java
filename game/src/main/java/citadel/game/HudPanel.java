@@ -1,6 +1,5 @@
 package citadel.game;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 
 import citadel.core.GameState;
@@ -55,10 +54,14 @@ public final class HudPanel {
     private static final int WHITE = 0xffffffff;
     private static final int RED = 0xffff1100;
     /** sv_ScrollArea sits in bitplane 0, so the message line is palette index 1. */
-    private static final int SCROLL_COLOUR = 0xffaaaaaa;
+    private int scrollColour = 0xffaaaaaa;
 
     private final float scale;
     private final HudGfx gfx;
+    private final Assets assets;
+    private final ByteBuffer stripPixels;
+    private final Texture2D stripTexture;
+    private int complex = -1;
     private final Picture strip;
     private final Picture overlay;
     private final Texture2D overlayTexture;
@@ -71,31 +74,47 @@ public final class HudPanel {
 
     public HudPanel(AssetManager assetManager, Assets assets, int complex, int screenWidth)
             throws Exception {
-        gfx = HudGfx.loadFrom(new File(assets.dataRoot(), "GAME/Gfx_VIR"));
+        gfx = HudGfx.loadFrom(assets.data());
+        this.assets = assets;
         scroll = new citadel.core.ScrollLine(gfx);
         scale = screenWidth / (float) PANEL_W;
 
-        java.awt.image.BufferedImage whole = javax.imageio.ImageIO.read(
-                new File(assets.assetRoot(), String.format("gfx/complex%d/hud.png", complex)));
-        ByteBuffer stripPixels = BufferUtils.createByteBuffer(PANEL_W * PANEL_H * 4);
-        // the png is top down and a jME texture is bottom up
-        for (int y = PANEL_H - 1; y >= 0; y--) {
-            for (int x = 0; x < PANEL_W; x++) {
-                int v = whole.getRGB(x, ROW0 + y);
-                stripPixels.put((byte) ((v >> 16) & 0xff)).put((byte) ((v >> 8) & 0xff))
-                        .put((byte) (v & 0xff)).put((byte) 0xff);
-            }
-        }
-        stripPixels.rewind();
-        strip = picture(assetManager, "hudStrip",
-                new Texture2D(new Image(Image.Format.RGBA8, PANEL_W, PANEL_H, stripPixels,
-                        ColorSpace.sRGB)), screenWidth);
+        stripPixels = BufferUtils.createByteBuffer(PANEL_W * PANEL_H * 4);
+        stripTexture = new Texture2D(new Image(Image.Format.RGBA8, PANEL_W, PANEL_H, stripPixels,
+                ColorSpace.sRGB));
+        setComplex(complex);
+        strip = picture(assetManager, "hudStrip", stripTexture, screenWidth);
 
         overlayPixels = BufferUtils.createByteBuffer(PANEL_W * PANEL_H * 4);
         overlayTexture = new Texture2D(new Image(Image.Format.RGBA8, PANEL_W, PANEL_H,
                 overlayPixels, ColorSpace.sRGB));
         overlay = picture(assetManager, "hudCounters", overlayTexture, screenWidth);
         overlay.setLocalTranslation(0f, 0f, CitadelApp.Z_TEXT);
+    }
+
+    /**
+     * The panel in a complex's colours. WINDOW1.RAW is drawn with whatever palette the complex
+     * loads (its COLS file), so the strip is redrawn whenever the complex changes.
+     */
+    public void setComplex(int complex) throws java.io.IOException {
+        if (complex == this.complex) {
+            return;
+        }
+        this.complex = complex;
+        Assets.Sprite whole = assets.panel(complex, gfx);
+        scrollColour = assets.panelColour(complex, 1);
+        stripPixels.clear();
+        // the panel is top down and a jME texture is bottom up
+        for (int y = PANEL_H - 1; y >= 0; y--) {
+            for (int x = 0; x < PANEL_W; x++) {
+                int v = whole.argb[(ROW0 + y) * whole.width + x];
+                stripPixels.put((byte) ((v >> 16) & 0xff)).put((byte) ((v >> 8) & 0xff))
+                        .put((byte) (v & 0xff)).put((byte) 0xff);
+            }
+        }
+        stripPixels.rewind();
+        stripTexture.getImage().setUpdateNeeded();
+        shownState = "";
     }
 
     private Picture picture(AssetManager assetManager, String name, Texture2D tex, int width) {
@@ -177,7 +196,7 @@ public final class HudPanel {
                     clamp(game.inventory.cardReading(card)));
         }
         blit(scroll.pixels(), citadel.core.ScrollLine.WIDTH, citadel.core.ScrollLine.HEIGHT,
-                citadel.core.ScrollLine.X, citadel.core.ScrollLine.ROW, SCROLL_COLOUR);
+                citadel.core.ScrollLine.X, citadel.core.ScrollLine.ROW, scrollColour);
 
         // argb is top down like the panel rows; the texture is bottom up like the strip
         overlayPixels.clear();

@@ -3,12 +3,10 @@ plugins {
 }
 
 val jme = "3.9.0-stable"
-val originalData = rootProject.extra["originalData"] as File
+val adfDir = rootProject.extra["adfDir"] as File
 
 dependencies {
     implementation(project(":core"))
-    // the packaged game converts the original data itself on first start
-    implementation(project(":tools"))
     implementation("org.jmonkeyengine:jme3-core:$jme")
     implementation("org.jmonkeyengine:jme3-desktop:$jme")
     implementation("org.jmonkeyengine:jme3-lwjgl3:$jme")
@@ -19,9 +17,9 @@ application {
 }
 
 tasks.withType<JavaExec>().configureEach {
-    // Assets converted by :tools:convert, and the original data for the .MAP files.
-    systemProperty("citadel.assets", rootProject.file("build/assets").absolutePath)
-    systemProperty("citadel.data", originalData.absolutePath)
+    // the original floppy images, which everything is read from, and where to save
+    systemProperty("citadel.adf", adfDir.absolutePath)
+    systemProperty("citadel.save", rootProject.file("build/Savegame.DAT").absolutePath)
     // gradle :game:run -Ppace=20  to try a different game speed
     (project.findProperty("pace") as String?)?.let { systemProperty("citadel.pace", it) }
 }
@@ -32,8 +30,6 @@ tasks.register<JavaExec>("shot") {
     description = "Renders a screenshot of a level for verification."
     mainClass.set("citadel.game.CitadelApp")
     classpath = sourceSets["main"].runtimeClasspath
-    systemProperty("citadel.assets", rootProject.file("build/assets").absolutePath)
-    systemProperty("citadel.data", originalData.absolutePath)
     systemProperty("citadel.screenshot", rootProject.file("build/shots").absolutePath + "/")
     // jME's ScreenshotAppState writes into the folder but never creates it
     doFirst { rootProject.file("build/shots").mkdirs() }
@@ -53,8 +49,8 @@ tasks.register<JavaExec>("shot") {
 // gradle :game:jpackage            a self-contained folder under build/jpackage/Citadel
 // gradle :game:jpackage -Ptype=msi an installer, which needs the WiX toolset on Windows
 //
-// The package holds no game data. On first start the game offers to download the original data
-// from Amiga-Citadel and converts it into a per-user folder (see citadel.game.Provision).
+// The package holds no game data. On first start the game looks for the five .adf disk images and
+// offers to download them into a per-user folder (see citadel.game.Provision).
 
 val appName = "Citadel"
 
@@ -118,7 +114,7 @@ tasks.register<Exec>("jpackage") {
             "--java-options", "-Xmx1g",
             // without this jlink keeps the whole JDK, which is a hundred megabytes of nothing.
             // java.desktop is ImageIO, AWT and the first-start dialogs, jdk.unsupported is the
-            // sun.misc.Unsafe LWJGL wants, jdk.crypto.ec the TLS GitHub's download needs
+            // sun.misc.Unsafe LWJGL wants, jdk.crypto.ec the TLS the disk download needs
             "--add-modules",
             "java.base,java.desktop,java.logging,java.management,jdk.unsupported,jdk.crypto.ec",
         )

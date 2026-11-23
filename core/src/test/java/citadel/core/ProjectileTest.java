@@ -41,22 +41,30 @@ class ProjectileTest {
         }
     }
 
-    /** The bullet weapons resolve at once; the other three put an object into the table. */
+    /**
+     * The bullet weapons resolve at once and leave at most impact marks; the other three put an
+     * object into the table, unless it lands within its first collision call.
+     */
     @Test
     void onlyTheSlowWeaponsMakeObjects() throws Exception {
         for (int slot : new int[]{1, 2, 3}) {
             GameState game = new GameState(load("LEVEL01A.MAP"));
             arm(game, slot);
             game.fire();
-            assertTrue(game.projectiles().isEmpty(),
-                    Inventory.WEAPON_NAMES[slot] + " should be hitscan");
+            for (Projectile p : game.projectiles()) {
+                assertTrue(p.isEffect(), Inventory.WEAPON_NAMES[slot] + " left " + p.type
+                        + " in flight");
+            }
         }
         for (int slot : new int[]{4, 5, 6}) {
-            GameState game = new GameState(load("LEVEL01A.MAP"));
+            GameState game = new GameState(new SyntheticMap().level());
+            game.posX = SyntheticMap.at(10);
+            game.posY = SyntheticMap.at(10);
             arm(game, slot);
             game.fire();
             assertEquals(1, game.projectiles().size(),
                     Inventory.WEAPON_NAMES[slot] + " should launch an object");
+            assertTrue(game.projectiles().get(0).inFlight());
         }
     }
 
@@ -72,9 +80,12 @@ class ProjectileTest {
         assertTrue(game.projectiles().isEmpty(), "an object outlived its counter");
     }
 
-    /** ro_SetExplode replaces a rocket with an explosion mark plus eight fireballs. */
+    /**
+     * ro_SetExplode replaces a rocket with an explosion mark and resolves its fireball probes on
+     * the spot: nothing is left flying, and a point-blank rocket costs the player 5 energy.
+     */
     @Test
-    void aRocketDetonatesIntoFireballs() throws Exception {
+    void aRocketDetonatesAtOnce() throws Exception {
         Level level = load("LEVEL01A.MAP");
         GameState game = new GameState(level);
         arm(game, 6);   // launcher
@@ -96,24 +107,17 @@ class ProjectileTest {
         game.posX = spot[0] * Level.CELL_UNITS + 512;
         game.posY = spot[1] * Level.CELL_UNITS + 512;
         game.angle = angleFacing(spot[2]);
+        int before = game.inventory.energyReading();
 
         game.fire();
         boolean sawExplosion = false;
-        for (int i = 0; i < 10 && !sawExplosion; i++) {
-            game.update(0, 0, 0, TICK);
-            for (Projectile p : game.projectiles()) {
-                sawExplosion |= p.type == Projectile.EXPLOSION;
-            }
+        for (Projectile p : game.projectiles()) {
+            sawExplosion |= p.type == Projectile.EXPLOSION;
+            assertFalse(p.inFlight(), "the blast left something flying");
         }
         assertTrue(sawExplosion, "the rocket did not detonate against the wall");
-
-        int fireballs = 0;
-        for (Projectile p : game.projectiles()) {
-            if (p.type == Projectile.FIREBALL) {
-                fireballs++;
-            }
-        }
-        assertTrue(fireballs > 0, "the blast threw no fireballs");
+        assertTrue(game.projectiles().size() <= 13, "one mark and at most twelve probes");
+        assertEquals(before - 5, game.inventory.energyReading(), "point blank, and only that");
     }
 
     /** An object must not pass through a wall, however fast it travels. */
@@ -153,22 +157,26 @@ class ProjectileTest {
         }
     }
 
-    /** A shot must not detonate on the enemy that fired it. */
+    /**
+     * es_PrepStruct starts an enemy's shot four or six vectors ahead, 300 units, which is what
+     * keeps it off its own shooter: Object_Collision has no notion of who fired what.
+     */
     @Test
     void anEnemyShotDoesNotHitItsOwnShooter() throws Exception {
-        Level level = load("LEVEL01A.MAP");
-        GameState game = new GameState(level);
-        Enemy shooter = game.enemies().get(0);
-        shooter.state = Enemy.WALKING;
-        int energy = shooter.energy;
-
-        // a fireball launched from the shooter's own position
-        game.projectiles().add(new Projectile(
-                Projectile.FIREBALL, shooter.x, shooter.y, shooter.angle, shooter.slot, false));
-        for (int i = 0; i < 3; i++) {
-            game.update(0, 0, 0, TICK);
+        for (int weapon = 1; weapon <= 6; weapon++) {
+            int sx = SyntheticMap.at(20), sy = SyntheticMap.at(20);
+            GameState game = new GameState(new SyntheticMap().species(0, 0xf, weapon, 0, 0)
+                    .enemy(1, 1, 100, sx, sy, 256, 0).level());
+            game.posX = SyntheticMap.at(10);
+            game.posY = SyntheticMap.at(10);
+            Enemy shooter = game.enemies().get(0);
+            shooter.state = Enemy.SHOOTING;
+            shooter.counter = 64;
+            for (int i = 0; i < 3; i++) {
+                game.update(0, 0, 0, TICK);
+            }
+            assertEquals(100, shooter.energy, "weapon " + weapon + ": the enemy shot itself");
         }
-        assertEquals(energy, shooter.energy, "the enemy shot itself");
     }
 
     private static int angleFacing(int dir) {

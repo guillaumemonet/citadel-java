@@ -17,27 +17,57 @@ actually matters: the data formats and the game rules.
 |---|---|---|
 | `core` | data formats and the runtime level model | none |
 | `tools` | asset converter and inspectors | `core`, `java.desktop` |
-| `game` | jMonkeyEngine viewer and, eventually, the game | `core`, jME 3.9 |
+| `game` | jMonkeyEngine front end and game | `core`, jME 3.9 |
 
 Requires a JDK 21 toolchain. `build/` and `tools/out/` are gitignored.
 
 ## Getting a level on screen
 
 ```sh
-gradle :tools:convert          # ../Amiga-Citadel/Data -> build/assets (PNG, WAV, text dumps)
-gradle :game:run               # walk around LEVEL01A
-gradle :game:run --args=LEVEL05B
+gradle :game:run                   # the cover picture, then the server's menu
+gradle :game:run --args=LEVEL05B   # straight into a level, then on through the campaign
 ```
 
-Conversion has to run once before the viewer, since the viewer loads its textures out of
-`build/assets`. Level data is read straight from the original `.MAP` files.
+The game reads everything from the five original disk images in `../adf` (or `-Padf=<path>`) and
+decodes it in memory; there is no conversion step. `gradle :tools:convert` still exports the
+repository's `Data/` to PNG, WAV and text dumps, for looking at.
+
+### The disks
+
+Disk 1 and disk 5 are AmigaDOS volumes; disks 2 to 4 have no file system and SERVER reads them
+by sector with its own track loader. Everything on them is PowerPacker 2.0, either as `PP20`
+files (disk 5) or as blocks whose first long word is their packed length (the track-loaded ones).
+`citadel.core.disk.GameDisks` serves them under their `Data/` paths:
+
+| what | where |
+|---|---|
+| maps, wall and enemy sets, palettes | disk 5 files `M3B`, `W3A`, `E3A`, `C3A`... |
+| `ITEMS01.VIR`, `WINDOW1.RAW`, `TEXT.ENG` | disk 4, block at cylinder 21 |
+| `ST.DAT` samples, `Bomba.rawb`, `CHAOSTAB/C.DAT`, `NUMBERS.RAW`, `FONTS01.FNT` | disk 4, block at cylinder 24 |
+| hangar | disk 4, block at cylinder 18 |
+| `mod.aconcagua.pro`, the server's music | disk 4, block at cylinder 1 |
+| `mod.dirranbandi.pro`, the end's music | disk 4, block at cylinder 12 |
+| `Savegame.DAT` | disk 4, unpacked, sectors 1 and 2 |
+| the end sequence's animations (`.k`) | disk 4, unpacked, from byte `0x76400` (cylinder 43) |
+| cover picture | disk 3, block at cylinder 72 |
+| `MT.raw` (+`0x82e2`), `KANE.fnt` (+`0xb61a`), `mod.MiedzyEtapy.pro` (+`0xc21a`, still packed), `HangarTab.dat` (+`0x13fb2`), `strzalka.rawb` (+`0x167cc`), the credits (+`0x5978`) and the epilogue (+`0x66f4`) | inside SERVER, disk 1 block at cylinder 27 |
+| map screen, MAPA's music `mod.brief1.pro` | disk 5 files `MAP` and `MOD`, length-prefixed blocks |
+| `mod.death.pro` (+`0x1618`), `zabity.rawb` (+`0x14568`), `GameOver.rawb` (+`0x1e1e8`) | disk 5 file `DET`, the death sequence, unpacked |
+
+`GameDisksTest` checks every one against Amiga-Citadel's `Data/`. They all match, except that the
+released disks carry one different wall tile in `WALLS1A.VIR`, a few different glyphs in
+`KANE.fnt`, and a save file whose free slots are called `EMPTY` rather than `WOLNE`. The disks
+are used as they are. The offsets inside SERVER follow from its `>extern` chain: `MT_pic`, then
+`KaneFont = MT_PIC+$3338`, `MT_endlev = KaneFont+$c00`, and so on down to `Strzalka`.
 
 Useful while debugging:
 
 ```sh
 gradle :game:shot -Plevel=LEVEL03C            # render one frame to build/shots
 gradle :game:shot -Pcam=top                   # top-down, to compare against maps/*.png
-gradle :game:shot -Pscreen=title              # render a front-end screen instead of the world
+gradle :game:shot -Pscreen=endlevel           # a front-end screen: title, hangar, slots,
+                                              # credits, map, endlevel, dead, gameover,
+                                              # victory, epilogue; -Pframe=N to wait longer
 gradle :tools:inspect -Pargs="../../Amiga-Citadel/Data/GAME/MAPS/LEVEL01A.MAP 24 7"
 ```
 
@@ -125,34 +155,88 @@ feel carries over:
 
 - The player is a point kept `min_distance - 60` = **307 units** from any face, out of 1024 per
   cell. `min_distance` is `500 * 256 / 350 + 2` with 68000 integer division.
-- Collision clamps the in-cell position *after* the move, which is what produces the sliding along
-  walls. Corners are handled as `br2_UP` / `br2_DOWN` do: push back along the axis with less
-  penetration, so you cannot cut through a sealed corner.
+- A pass of `sv_DoMMove` is one vector of `sv_WalkSpeed` along the view, turned by 0, ±64, ±128,
+  192, 256 or 320 for the eight key combinations, so a diagonal is as long as a straight line.
+  `sv_rotate` floors (`add.l / swap`): 250 due north is 249 units.
+- Collision clamps the in-cell position *after* the move (`sv_Border`), which is what produces the
+  sliding along walls: within 307 of a shut face, X first (west, else east), then Y (south, else
+  north), the far side tested with `>= 717`.
+- Corners are `br2_UP` / `br2_DOWN`: in a corner zone, if either of the two faces meeting the
+  corner from the neighbouring squares holds *anything* (`tst.b`, open doors included), push back
+  along the axis that went in **less**, X on a tie. At `LEVEL01A` (14,5) an in-cell (200, 740)
+  comes out (200, 717).
+- The enemy whose number is in the square's byte 7 blocks the player when within 300 on both
+  axes: `sv_LastPos` goes back into `sv_PosX` and the walls' clamping is discarded with it. A
+  burning one costs a point, SOUND 13 and SCROLL 71 (`br2_COLUMN`).
 - A face is passable when its value masked with 62 is 0, 32, 38 or 54 — nothing, either door type
   open, or a broken door (`br_ChkDoors`).
 - Enemy steps are refused against the cell the step began in, one axis at a time. Testing only
   the destination cell's own faces lets a diagonal step slip past a sealed corner, which in play
   looks exactly like an enemy walking through a wall.
-- Columns 1, 2 and 18 block a 208-unit box around the cell centre; column 3 is decorative and
-  column 4 is a teleport pad (`.br2_COLUMN2`).
-- Doors open by themselves when the player stands in an adjacent cell, unless that cell carries
-  the block flag, and shut again on leaving. Only one door of each type moves at a time, over 5
-  steps, exactly as `br_Chk_OPEN` and `OpenCloseDoors` do.
+- Columns 1, 2, 4 and 18 have a box of 304..719 on both axes (`.br2_COLUMN2`); column 3 is
+  decorative and column 4 is a teleport pad. Entering one pushes back to 302 or 722 on *each* axis
+  the last pass's position was outside the box on. The barrel (18) jumps to `.br2p` past the low X
+  test, landing on its `bmi` with the flags of `cmpi #18` — never minus — so its box runs to the
+  west edge of the square, and walking north into it from west of 303 puts you at x 302.
+- `br_BumpWall` counts a bump within 62 of head on and on a stride of 120 or more, and stores a
+  rebound: `sv_LastMove+4` the stride, `+6` the direction reflected off the face. The next passes
+  spend it 60 shorter each time and it *replaces* the player's own step — 250 into a wall comes
+  back as 190, 130, 70 and 10 — so pushing into a wall bumps about once every six passes (a little
+  more often as `EXCITE` shortens the stride). The point-blank flamer and bolter (190) and
+  launcher (250) recoil through the same field, at `-sv_Angle`.
+- `sv_AddMove` is what a shot (`oc_PlayerHit`, four times its vector) or an enemy walking into you
+  (`me_PLAYER`, a quarter of its step) adds. The next `sv_DoMMove` tests its X word and, if that is
+  not 0, replaces the step with both words `andi #$ff`: every shove lands in 0..255 towards +X and
+  +Y, a negative one going the wrong way. That is the original's arithmetic and the port keeps it.
+- Vodka (`sv_Vodka`, 190 passes a bottle): each pass two random seven-bit signed numbers, -64..63,
+  are added to the sideways and length components, the second `asr #3` skews the direction and
+  turns the view back by as much. Standing still the drift goes backwards: with no key pressed
+  `sv_MouseMove` still calls `sv_DoMMove`, with d3 = 1.
+- Angles are always even (`andi #$1fe`).
 
-Two departures from the original, both deliberate:
+Doors (`br_Chk_OPEN`, `OpenCloseDoors`, `ServePriorDoor`):
 
-- Movement is split into sub-steps and a crossing is rejected against the cell it started in. The
-  original never needs this because it moves at most 250 units a frame against a 307 unit clamp,
-  but a variable frame rate can ask for much more, and without it a door shutting on a straddling
-  player lets them slip through.
-- The combined forward/strafe input is normalised. The original moves along one vector capped by
-  `sv_WalkSpeed`; keyboard strafing would otherwise make diagonals 41% faster.
+- Each of the two channels, `sv_DoorFlag1` and `2`, is ported field for field
+  (`GameState.DoorSlot`). Every pass `br_Chk_OPEN` clears the channel's flag and, unless the square
+  carries the block flag, lists every face of its type in the square with its far side, sets the
+  flag, and sets the counter from the face: 6 if shut, -1 if open, unchanged if moving — so a door
+  caught half way keeps its count when you come back. The list is only rewritten when the square
+  has such a door, so a door left behind for another square's stays as it was, open or half way.
+- Door 1 counts 6 → 5 (clamped) → 4 … 0 showing 34 and is open on the **sixth** pass, and takes six
+  to shut; door 2 counts 5 … 0 and is open on the **seventh**, seven to shut. The door sound plays
+  whenever the flag differs from the one remembered at +44, so starting to open and starting to
+  close; door 1 plays SOUND2 16 instead of 9 on a level whose header word 26 is set
+  (`Level.doorSound16`); door 2's SOUND2 10 comes from a point a square east and half a square
+  south of the door, `addi #512,d0` being written twice.
+- `oc_FixMap` writes the whole byte, so a door that moves loses any blood on it; and since
+  `br_Chk_OPEN` compares the whole byte, a bloodied door never opens by itself.
+- A command door (`rm_OpenDoor` / `rm_CloseDoor` from a switch or a card) is skipped if already
+  there or moving, and otherwise queued on its channel's priority table at +24, appended to
+  whatever is queued, with the last command's flag. `ServePriorDoor`, after `Check_RMB`, hands it
+  to the channel once the channel is not in use — so it waits while the player keeps an automatic
+  door of that type open — and it then animates with its sound like any other. While it runs,
+  `br_Chk_OPEN` skips that channel. `rm_ServeSwitch` refuses with SCROLL 54, leaving the switch
+  alone, while either channel has a priority door queued or running.
+- The renderer asks `GameState.doorOpenFraction(x, y, dir)` per face: 1 for 32/38, the channel's
+  counter for 34/40 (`oc_DrawOpen` draws every face holding that value from one shared texture),
+  0 otherwise.
+
+One departure from the original, deliberate: a move that crosses into another square through a
+shut face is refused against the square it started in (`blockCrossing`). The original has no such
+test; sober it never needs one (at most 250 or 300 units against a 307 clamp, and `sv_AddMove`
+only pushes towards +X/+Y, at most 255 from a clamp at 717), but a drunk stride of up to 313 takes
+a player clamped against a wall six units through it, and `sv_Border` then clamps him on the far
+side.
+
+The keyboard maps onto `sv_joystick`'s eight directions; an analogue input shorter than 1 scales
+the length, and its direction is still taken as one of the eight.
 
 ## Tests
 
-`gradle :core:test` runs headless against the shipped maps: 120 tests covering parsing, movement,
-doors, switches, pickups, line of sight, enemy movement, the animation tables, the interference
-burst, exhaustion, the cheat codes, and the four data tables whose exhaustiveness the transitions
+`gradle :core:test` runs headless against the shipped maps and disks: about 190 tests covering parsing,
+movement, doors, switches, pickups, line of sight, enemy movement, the animation tables, the
+interference burst, exhaustion, the cheat codes, the save file, LevelLoop and MAPA, the music,
+and the four data tables whose exhaustiveness the transitions
 depend on. The one that earns its keep is a random walk of 20 000 steps across five levels
 asserting the player never ends up on the far side of a shut face. It found both departures
 listed above.
@@ -166,15 +250,23 @@ Done:
 - jME geometry: walls, sliding doors, floors, ceilings, billboards for columns, items and enemies
 - movement, collision, automatic doors, switches and their commands, teleports, level exit
 - item pickup and a working inventory (weapons, ammo, cards, first aid, boost, vodka, warhead)
-- enemy simulation: roaming, closing in, line of sight, shooting, damage and death
-- player weapons: hitscan fire, ammunition, weapon wear, per-species vulnerability mask
+- enemy simulation: roaming, closing in, line of sight, shooting, recoil, burning, the death
+  fall, corpses, blood and ammunition drops
+- player weapons: bullets resolved at once, ammunition, weapon wear, the launcher's reload, the
+  point-blank costs, per-species vulnerability mask
+- barrels: damage, destruction and the explosion they set off
 - sound: 25 effects, positioned in the world for doors and enemies
-- intro animations and artwork decoded to PNG (IFF ANIM op 5, Hold-and-Modify)
+- the end sequence's animations decoded (Kane's `.k` repacking of IFF ANIM op 5, Hold-and-Modify)
 - the ETAPY level sequence, with the inventory carried across levels
-- the original in-game messages, with their random variants
+- the original in-game messages, with their variants taken in turn
+- switches both ways: going in runs a record's first command list, coming out the list after its
+  `-2` (`rm_ServeSwitch`); and everything `rm_HandUsed` says about what the hand touches
+- card readers: a card is taken in hand with 7, 8 or 9 like a weapon and fired at the slot, which
+  must be empty and want that colour (`rm_CardUsed`)
+- items standing on tables: bit 5 of the item byte is their height, not part of the item
 - the level clock, low-energy warning, death, and the automap
-- projectiles in flight: fireballs, electricity, rockets, and explosions that throw fireballs
-- saving and loading in the original 768 byte Savegame.DAT format
+- projectiles in flight: fireballs, electricity, rockets, and `ro_SetExplode`'s twelve probes
+- Savegame.DAT byte for byte, saved where SERVER saves (ENDLEVEL_PART) and loaded where it loads
 - the compass needle, and in-flight object sprites resolved to their real 16x16 grid
 - texture animation: the animated wall, the three animated columns, and the shared enemy walk phase
 - `sv_MAKE_SZUM`, the interference burst when a shot lands or the player walks into a wall
@@ -188,43 +280,73 @@ Done:
 - the original status panel, with every widget where the engine puts it, and `sc_DoScroll`
 - the server's own screens decoded: hangar, map, cover art, disk prompts, and the death picture,
   which the death card now shows, and the hangar, which the menu and the save slot picker sit in
-- the server's menu itself: MainServer's four screens, in the panel, in its own font
+- the server's menu itself: MainServer's four screens, in the panel, in its own font, revealed
+  through HangarTab, with the cursor flashing through FlashTab
+- SERVER's flow: `s`, StartGame, LevelLoop, LoadTrening, and what each of the engine's three
+  answers leads to
 - MAPA, the map between complexes, with the choice of three it gives and the centre's conditions
-- front end: the intro animation plays, then a title screen, with death and victory cards
-- the five-slot save menu, reading and writing the original file
+- ENDLEVEL_PART, the report after each level, and the save it offers
+- DEATHSEQ, the death sequence, and GAME OVER
+- END_PART2: kabina, start and explozycja, then the scrolling epilogue
+- CREDIT_PART, the scrolling credits behind INFO
+- the music: a ProTracker player for the game's ".pro" modules, and the five songs where SERVER
+  plays them
+- `TELEPORT` into an empty window on the way out of a level, and the pause key
 - playable viewer, plus a screenshot path for verification
 
 Not started:
 
-- the pushes that go with a hit: `sv_AddMove` and the `sv_LastMove` rebound, see below
+- the intro, see [The intro](#the-intro)
 
 ## Saves
 
-`Store/Savegame.DAT` is 768 bytes: the live state in the first 128, then five slots of 128. Each
-block is the engine's `STRUCTURE`, the record the server keeps at `$7f800` and hands to the game
-between levels. A slot carries a 16 byte name at +72, set to `WOLNE@` — Polish for "free" — when
-empty, with `@` terminating the string as it does in the text files.
+`Store/Savegame.DAT` is 768 bytes: a head block, then five slots, each the engine's
+`STRUCTURE`, the 128 byte record the server keeps at `$7f800` and hands to the game between
+levels. On the released disks it is sectors 1 and 2 of disk 4, which SERVER reads at boot and
+writes back with `dl_START_s2` (`$8001`: save). `citadel.core.Structure` names its fields:
 
-MAPA's own fields live in the same block: it marks a complex off with `move.b #1,64(a1,d0.w)`,
-d0 being the complex less one, and counts them up in the word at 98 — the one the centre checks
-for seven. The port writes and reads both, so which complexes have fallen survives a save.
+| offset | what |
+|---|---|
+| +0, +2, +4 | screen size, floors, details — the renderer's options |
+| +6, +8 | energy (negative) and `sv_Glowica` |
+| +10, +12 | enemies killed and seconds spent on the level just played |
+| +14 | `sv_GUNS`, 18 words: per weapon condition, ammunition a pickup, ammunition |
+| +50 | difficulty, 1 for easy |
+| +60, +62 | the complex, and how many of its levels are behind you |
+| +64 | one byte a complex, set once it has fallen |
+| +72 | the slot's name, ended by `@` |
+| +88 | occupied: `WczytajStan` will not load a slot with 0 here |
+| +90 | enemies killed in all, which GoodExit adds +10 to |
+| +92 | `KANE` on the last level |
+| +98 | complexes taken, which the centre wants at seven |
+| +100 | the interference switch |
 
-Offsets come from the engine's own load, which reads size, floor, details, energy and Glowica
-individually and then copies **18 words from +14** into `sv_GUNS`: six weapons of (condition,
-ammunition per pickup, ammunition). That is cross-checked against the shipped file, where
--10, -5, -10, -5, -5 and -1 land exactly on those six per-pickup fields.
+The engine reads +0, +2, +4, +6, +8, +50, +100 and the guns when a level starts and writes them
+back, with the kills and the time, when it ends. Everything else is SERVER's:
 
-The front end drives it through a five-slot picker: `F5` saves, `F9` loads, W/S or the arrows
-choose, ENTER confirms and E backs out. Each row shows the name, the complex and sub-level, and
-the energy the save was made with.
+- **`s`** copies the head block to STRUCTURE, which is how a new game starts at complex 1 with
+  150 energy, and keeps a pristine copy of it at `STRUCTURE+$300`. RememberOpt carries size,
+  floors and details across a return to `s`; the difficulty is not carried, so it goes back to
+  HARD.
+- **LevelLoop** adds one to +62 before it looks the level up in ETAPY. So +62 counts levels
+  finished, a slot saved after a level resumes at the next one, and a slot saved after the last
+  level of a complex resumes in MAPA.
+- **ENDLEVEL_PART** is the only place a game is saved. The slot gets a copy of STRUCTURE — +88
+  comes along with it, since the head block has a 1 there — then its name: `NazwyPoziomow2` for
+  the complex up to its `@`, and the level digit, so `STORES 2`. The file is written as the
+  pristine head followed by the five slots.
+- **LOAD GAME** copies the slot to STRUCTURE and goes straight into StartGame.
 
-`SaveGame` writes that layout byte for byte, so a save made by the port is a file the Amiga game
-would read. The test suite loads the shipped `Savegame.DAT` and asserts its five slots read as
-free and its head block starts at -150 energy.
+The port does the same with the same file. It reads it from disk 4 the first time and writes it
+to the per-user folder, never to the disks. F5 and F9 in play are its own addition: F5 writes
+the slot ENDLEVEL_PART would have written after the level before this one — STRUCTURE as this
+level began, with +62 one less — so loading it starts this level over as it began; F9 loads a
+slot the way LOAD GAME does. Saves made by earlier versions of the port did not set +88, so
+their slots read as free.
 
 ## Hold-and-Modify
 
-The intro artwork and animations are HAM6, which `CAMG` bit 0x800 announces. A HAM pixel's top two
+The cover picture and the animations are HAM6, which `CAMG` bit 0x800 announces. A HAM pixel's top two
 bits say whether to take a colour from the palette or to hold the previous pixel and modify one of
 its components. Decoded as a plain indexed image they come out buried in red and green speckle --
 which is what the first version of this port did, and what a careful look at the title screen
@@ -240,13 +362,19 @@ B and C, complex 8 is A alone and then the game ends. That is 21 levels. Several
 the sequence never visits — `LEVEL01T`, `LEVEL03K`, `LEVEL05D` and others — and they stay
 playable on their own.
 
-Reaching the exit cell loads the next map and carries weapons, ammunition, cards and energy
-across, which is what the server does by keeping them in `STRUCTURE` between levels.
+Reaching the exit cell loads the next map and carries weapons, ammunition and energy across,
+which is what the server does by keeping them in `STRUCTURE` between levels. Then the engine's
+own start runs (`GameState.beginLevel`): energy is capped at 500, cards are cleared — every level
+starts without them — and on easy the energy is topped up and the enemies thinned, see the
+server's menu below. A new game starts from the head of `Savegame.DAT`: 150 energy, and 10
+machinegun rounds a pickup, which override the engine's own -225 and -15.
 
 `TextTable` reads `Store/TEXT.ENG` (or `.POL`, `.GER`). The file is split by `@`, one block per
 message numbered from zero, and that numbering is exactly the `SCROLL` macro's argument. A block
-whose first line starts with `^` holds interchangeable lines the engine picks between at random,
-which is why walking into a wall insults you differently every time.
+whose first line starts with `^` holds lines that take turns: `.sc_ChooseText` keeps a read offset
+in the two bytes after the `^` and moves it on with each use, so the variants come in order and
+wrap. Walking into a plain wall prints message 1, the insults, in turn; a shut door gets 40 and a
+door still opening 42 (`br_BumpWall`).
 
 Message numbers are verified against their call sites at 40, 41, 44, 52, 53, 54, 65 and 76. Pickup
 messages need no table of their own: every branch of `Take_Items` computes an index that works out
@@ -263,7 +391,7 @@ counters at once:
 | `sv_WallOffsets[23]` | tiles 23, 24 | the one animated wall texture |
 | `sv_BloodOffsets[5]` | two windows in tile 38 | a plaque; not drawn yet, see below |
 | `sv_CollumnOffsets[4]`, `[12]`, `[20]` | four sprites each | three animated columns |
-| `sv_WalkState` | 0, 2, 4, 6 | the enemy walk phase |
+| `sv_WalkState` | 0, 6, 4, 2 | the enemy walk phase: +2 in each of the three `sv_DAdo` calls |
 
 `sv_WalkState` is a single global, so every enemy on screen steps in time; the port keeps one
 counter on `GameState` and feeds it to all four. `LEVEL01A` alone has 48 animated wall faces and
@@ -306,8 +434,9 @@ The trace itself is a 29 column window onto a 32 entry ring, one vertical run pe
 `bset/bset/bclr/bclr/bset` pattern over five interleaved bitplanes spells out index 19, the same
 green in every palette.
 
-**Not ported:** the three point-blank cases also cost energy and shove the player, and the shove
-is left out for the same reason as the others.
+The three point-blank cases also cost energy — 5 for the flamer and the launcher, 1 for the
+bolter — and that is ported. They also throw the player back through `sv_LastMove+4/+6`, 190 or
+250 at `-sv_Angle`, spent like a wall's rebound (see **Movement rules**).
 
 ## The status panel
 
@@ -471,21 +600,41 @@ s_scrMain1:  1,"     START      "   s_scrTRENING: 0,"    DUNGEONS    "
 ```
 
 DrukTekst puts the block at `SERscr+8*16*6`, eight rows into the panel, and steps `15*16*6` a
-line — so the lines are at rows 61, 76, 91 and so on, sixteen characters from x 96. PostawKropa
-marks the chosen one with an eight pixel circle at `iff_screen+[63*40*6]+11` stepped by
-`kropa*40*15*6`, which puts a dot either side of the line at x 88 and x 224. The flag byte picks
-between two glyph routines, the second of which rolls each byte four bits and writes two, drawing
-the line at double width.
+line — so the lines are at rows 61, 76, 91 and so on, sixteen characters from x 96. A glyph's set
+bits go into planes 1 and 4 and out of the others, which is colour 18 of the hangar's palette.
+PostawKropa marks the chosen line with an eight pixel circle at `iff_screen+[63*40*6]+11`
+stepped by `kropa*40*15*6`, a dot either side at x 88 and x 224, in plane 0 alone: colour 1.
+
+The flag byte picks between two glyph routines. The second, `m_CopFont2`, rotates the glyph's
+byte four bits and writes the two halves into neighbouring bytes, so the glyph lands four pixels
+further right — not wider. The flagged lines are the ones with an odd number of spaces round
+them, so the shift centres them.
+
+The text is not drawn on the screen but into a copy of the panel, `SERscr`, and then copied over
+a byte column at a time in the order `Store/HangarTab.dat` gives: 816 entries, each a byte and
+its twin 51 rows down, 32 a VBLANK. That is the panel dissolving into the next menu. While the
+menu is up NewLev3 writes the next of FlashTab's sixteen greens into colour 1 every other VBLANK
+(`move 2(a1,d0.w),Maincopper+6`); colour 1 is a register, so anything else in the hangar drawn in
+colour 1 flashes with the dots. Leaving LOAD GAME, the options or TRAINING puts the cursor back
+on the line that opened it (`move #1,Kropa`, `#2`, `#3`).
+
+LOAD GAME is the same panel: WczytajStan copies the five slot names in, left aligned, with MENU
+under them, and refuses a slot whose +88 is 0.
 
 All five training entries turn out to ship. `FileStructure2` names a map for each — M1T, M3T,
 M3K, M5T, M6T — and `LEVEL03K.MAP` is there beside the other four, so STORES 2 works too. None of
 those five maps was reachable from the port before. The complex numbers double as the naming: 1 is
 the dungeons, 3 the stores, 5 the laboratory and 6 the sewers.
 
-The options screen is the one place the port does not follow. The original's four are the
-renderer's — screen size, detail level, floors on or off — and none of them mean anything here,
-so only `sv_difficult` is kept, the one the engine itself reads: `br_BumpWall` skips the point of
-energy when it is set, so easy means walking into walls is free.
+The options screen shows the original's four, as `u_Poustawiaj` writes them into
+`s_scrOPCJE` (typo in SCREEEN included), and they change STRUCTURE the way `UstawOpcje` does.
+Three of them are the renderer's — screen size, detail level, floors on or off — and mean nothing
+to a GPU, so they are kept, saved and ignored. The difficulty, STRUCTURE+50, is the one the
+engine reads, in five places: at
+the start of a level it raises an energy reading under 90 to 90 plus a random 0..63, empties
+every fourth slot of the enemy table and cuts both species' aggression to 4/5; `Take_Items` gives
+a weapon picked up 70 more condition; and `br_BumpWall` skips the point of energy, so walking into
+walls is free.
 
 ### KANE.fnt
 
@@ -553,6 +702,136 @@ two fields.
 in its palette. `map_NEWLEV3` bobs it through `Asinus`, a 32 entry table of heights up to 9 — and
 `ClrArrow` restores 20 rows behind it, which is 11 plus that 9.
 
+The status line is not part of the picture. MAPAcopper turns the bitplanes off at line `$f6` and
+on again, one deep, at `$f8` — row 194 — with a colour of its own, `ma_col`, on black. Every
+change of the line goes through `ma_out` (that colour from `$eee` down by `$222` a VBLANK),
+`ma_clr`, `ma_draw` and `ma_in` (back up). `Printnij` fills `KomplexTexts` at offsets 9 and 28.
+A refusal stays up for 110 VBLANKs before the status comes back (`ma_uf`); a choice prints
+`CHOSEN` and the name (`OKtext`, the name at 9 + 11), waits 150, sets STRUCTURE+60 from Kon2Tab
+and +62 to 0, and fades the map out. MAPA marks the complex just left on the way in, so it is
+STRUCTURE that says which have fallen, and loading a game reads it from there and nowhere else.
+
+## The front end as a script
+
+SERVER is straight-line code that waits for the vertical blank with its `VBLANK` macro and leaves
+the per-frame work — the music, the cursor, the flashing, the arrow — to a level 3 interrupt.
+`citadel.game.Server` runs it the same way: on a thread of its own, in lockstep with the render
+thread, which lets it run up to its next `vblank()` once a frame and runs the current interrupt
+first. A `move #110,d0 / VBLANK / dbf d0` is `vblanks(111)`, and the transcription follows the
+assembly loop for loop:
+
+```
+s           STRUCTURE from the save file's head block, mod.aconcagua, the hangar
+MainServer  START, LOAD GAME, OPTIONS, TRAINING, INFO (the credits)
+StartGame   LoadFirstData (the hangar fades, the music stops), then
+LevelLoop   +62 moves on and ETAPY says what next: a map, MAPA, or END_PART2
+            the engine answers +   GoodExit: +90 += +10, ENDLEVEL_PART, LevelLoop
+                               -   DEATHSEQ, then s
+                               0   ESC: s
+LoadTrening a training map; whatever happens, s (DEATHSEQ first if killed)
+```
+
+Playing a level is the one thing it hands over: the script asks for the level and waits, frame by
+frame, until the engine's side says how it went. The screen it draws on, `Display`, is 320 by 200
+palette indices and the colour registers that show them, with Extra Half-Brite, so the fades work
+on the registers exactly as `se_setcolors` (each component one step towards the target, sixteen
+steps), `fadecolors` (each component one step down, seventeen steps) and the death sequence's
+`setcolors` (the target times d0 / 16) do. All of them are two VBLANKs a step, the death
+sequence's three.
+
+ESC is not a way out of the menus in the original: in KeyMode 0 the keyboard handler takes ESC,
+RETURN, SPACE and ENTER all as fire. The port keeps that and lets ESC quit from the cover
+picture, which the original never returns to.
+
+## Music
+
+The music is ProTracker, repacked by the authors into a ".pro" layout their replayer
+(`mt_init`, `mt_music`) reads: 31 sample headers of 8 bytes — a ProTracker header without the
+name — the song length at 248, then four position tables of 128 bytes, one per voice, each
+naming a *track* of 64 one-word rows; the words index a table of the distinct 4 byte notes the
+song uses, and the samples follow. Where a ProTracker module stores one pattern of four channels
+per position, this stores a track per voice per position and shares identical tracks and notes.
+The number of tracks is not stored: `mt_init` scans the position tables for the largest entry.
+`citadel.core.ProModule` reads it; `MusicTest` checks the layout accounts for every byte.
+
+`citadel.core.ProTrackerPlayer` renders a song to 16 bit mono. It comes from the author's
+Breathless port and is adapted to this replayer: `mt_music` runs from the VBLANK interrupt, so a
+tick is 1/50 s and `Fxx` is always a speed, never a tempo. A song is rendered whole on a worker
+thread and looped, which is what `mt_music` does when the song position wraps. Where SERVER plays
+what:
+
+| song | where |
+|---|---|
+| `mod.aconcagua` | `s` to LoadFirstData: the hangar, its menus, the credits |
+| `mod.brief1` | MAPA |
+| `mod.MiedzyEtapy` | ENDLEVEL_PART |
+| `mod.death` | the death sequence, from DET |
+| `mod.dirranbandi` | END_PART2, the animations and the epilogue |
+
+The engine has no music.
+
+## Between levels
+
+ENDLEVEL_PART puts `MT.raw` up — four planes stored one after the other, not interleaved, with
+16 colours after them — and prints into a fifth plane whose 16 colours are all `$fe0`, so the
+text is yellow whatever is under it. `el_text` is positioned text: a 0 byte, a byte column and a
+row, then characters, sixteen rows of KANE.fnt each:
+
+```
+     DUNGEONS LEVEL 1 COMPLETED!           NazwyPoziomow, and +62
+ENEMIES KILLED:              017          +10, three digits
+ELAPSED TIME:                1:12:34      +12, the hours stop at 9
+PARTS OF BOMB:               3            -Glowica / 2
+      DO YOU WANT TO SAVE THE GAME?
+             NO          YES
+```
+
+A frame `el_RamkaPos` says where is drawn round the choice by `EL_NewLev3`, which blinks it, 20
+VBLANKs on and 20 off, while it stays put. Left and right move it between NO and YES. YES offers
+the five slots and QUIT; a slot is saved as [Saves](#saves) describes, and `OK !` stays up for 80
+VBLANKs. Everything fades out, the music stops, and LevelLoop goes on.
+
+## The death sequence
+
+After `sv_Death` and `p_FadeColors` the engine returns, and SERVER loads DET from disk 5 and runs
+it (Death14.ss). zabity fades in to `mod.death` (`setcolors`, three VBLANKs a step), and stays up
+to 40 seconds (`move #50*40,d0`) or until ESC, SPACE, RETURN, ENTER or fire. Then 49 passes of
+`DorLoop1` close GAME OVER over it: the copper list shows `GameOver+20000` less two rows a pass
+from the top of the screen down to a wait that moves down two lines, zabity below that, and
+`GameOver+20000` again from a wait that moves up two lines from the bottom — the picture's two
+halves sliding in from the edges. The finished GAME OVER, in zabity's colours, stays up to 44
+seconds, fades, and SERVER goes back to `s` with a fresh STRUCTURE. `GameOver.rawb` has no
+palette of its own; it is in DET after zabity, which is where the port reads both.
+
+## The end
+
+When LevelLoop finds the 1 in ETAPY after the centre, END_PART2 plays the three `.k`
+animations — kabina, start, explozycja, in that order — to `mod.dirranbandi`, nine VBLANKs of
+black between them. Each runs on a row of the `anims` table: (VBLANKs a tick, ticks) pairs. The
+rows are labelled anim1 to anim3, but END_PART2 writes the address of the animation it is about
+to play over the row `AnimsAdr` points at and ReplayPart moves on a row afterwards, so the rows go
+to the animations in the order played: kabina gets the first. Then `ko_scroll` clears the screen,
+waits 71 VBLANKs, and scrolls `Koncowka` up a row every three: one plane, KANE.fnt, a line every
+16 rows, colour 1 graded by the copper list from `$222` at the top to `$fff` and back down at the
+bottom. Holding a key or a button stops it; at the end it waits for one, and SERVER goes back to
+`s`.
+
+CREDIT_PART, behind INFO, is the same scroller over `MT.raw`, a row every two VBLANKs, in the
+yellow plane; SPACE holds it, RETURN, ESC, ENTER or a button leaves.
+
+## The intro
+
+Not ported. The intro is a separate program, IntroReplayer, and its data is on disks 1 to 3:
+there are `.k` animations unpacked at bytes `0x9cc00` (49 frames), `0xc65ae` (17) and `0xd1530`
+of disk 1, at `0x94800` and five more places on disk 2, and at `0x73800`, `0x8814c` and
+`0xa7e8e` on disk 3. But they are not whole files: the player track-loads overlapping ranges,
+copies the start of one animation out of the tail of another (`anim1+215344`, 37794 bytes) and
+single frames between them (`anim3b`, `anim6`), and the third animation on disk 1 runs off the
+end of the disk. Rebuilding that, the HISTORIA text screens over `Panel_Hires` and
+`mod.IntroDela` is a job of its own. The port starts on the cover picture the intro ends on.
+`citadel.tools.AnimReader` still applies IFF ANIM deltas to the previous frame rather than to the
+one two back, which matters only for the IFF originals; `KAnim` decodes the `.k` files right.
+
 ## Dying
 
 `sv_Death` is blood running down the screen, and it is on its own clock: `EndLevel` only reaches
@@ -574,7 +853,8 @@ The rows it fills use `and d4` on planes 0, 2 and 4 and `or d3` on planes 1 and 
 index 2 + 8 = 10 — `#BB0000`, another of the fixed engine colours.
 
 `EndLevel` returns 0 the whole time this runs, which is how the engine keeps the game open until
-the sequence is over. The port does the same job by staying in its PLAYING mode.
+the sequence is over. The port does the same job by staying in its PLAYING mode. Then comes the
+fade, and the server's [death sequence](#the-death-sequence).
 
 ## Fading out
 
@@ -586,6 +866,27 @@ approximation.
 It runs at the end of both ways out of a level: after `TELEPORT` when the exit is reached, and
 after `sv_Death`. So a level change happens behind a black screen rather than as a cut, and the
 port now does that too.
+
+On the way out through the exit EndLevel first empties the window in the hidden screen (`.Clrscr`,
+or the window background from `sv_WindowSav`) and then calls `TELEPORT`, so the view breaks up
+into black before the fade. The port captures the frame as it does for a teleport and eats it
+away over a black plate.
+
+## Pausing
+
+P toggles `sv_Pause` and prints message 37 or 38; while it is set MAIN_LOOP does nothing but
+spin, one VBLANK a turn, counting down from 750 and printing message 41 each time the count runs
+out — every 15 seconds. `NewLev3` keeps the level clock and the low-energy beep going and skips
+`Draw_Heart`, so the heart neither races nor recovers.
+
+The map is a pause too. M or TAB flips `sv_MapOn` whether paused or not, and `MAIN_LOOP` hands
+over to `ServeMap`, which flips `sv_Pause` on the way in and again on the way out and prints
+message 74 with the square written into it (`SetLocation`: "YOUR LOCATION: 07-42"). While the map
+is up every key but the map's is ignored (`cc_IsMap`).
+
+`GameState` owns all of this — `togglePause`, `toggleMap`, `isHalted`, and an `update` that only
+runs the vertical blank while halted — and `CitadelApp` forwards the two keys and ignores the rest
+while it is halted.
 
 ## Bumping into things
 
@@ -609,10 +910,9 @@ brushing a wall as you walk along it is free.
 Without it, walking along any wall bumps every single pass: a point of energy, an insult, a jolt
 to the heart and a burst of interference, over and over. That is what it looked like in play.
 
-The engine's head-on angles are 0 east, 256 west, 128 north and 378 south. The first two are the
-other way round in this port because its X axis is mirrored against the engine's; the south one is
-straightened from 378 to 384, a six unit skew that is either a slip or a hand-tuned fudge and is
-four degrees either way.
+The engine's head-on directions, in `sv_rotate`'s terms (`256 - angle`), are 0 east, 256 west, 128
+north and 378 south. The port tests them in those terms, as the engine does, so the south one's six
+unit skew from 384 is kept, in the window and in the reflected rebound (`378 + 378`).
 
 **Z** toggles the burst, as `cc_z` does — *zakłócenia* is Polish for interference — printing
 DISTURBANCES: ON or OFF. `MAIN_LOOP` tests `cc_RequestTab2` before calling `sv_MAKE_SZUM` and
@@ -630,11 +930,11 @@ straight out of Amiga ROM, and fills each one across with the byte `$88`.
 complex palette holds as the same pale blue `#9999DD`. Solid full-width lines, in other words, so
 the port draws them from a texture one pixel wide stretched across the window.
 
-`oc_PlayerHit` also turns the player by a random `-8..7`, which is ported. The pushes that go with
-both events are not: `br_BumpWall` writes a rebound into `sv_LastMove+4/+6`, and `oc_PlayerHit`
-adds four times the shot's velocity to `sv_AddMove` - which `sv_DoRotIt` then reads back under
-`andi #$ff`, destroying the sign and sending a negative push the wrong way. That one is a bug in
-the original, and reproducing it would only feel broken.
+`oc_PlayerHit` also turns the player by a random `-8..7`. Both events push the player as well:
+`br_BumpWall` writes a rebound into `sv_LastMove+4/+6`, and `oc_PlayerHit` adds four times the
+shot's velocity to `sv_AddMove` - which `sv_DoRotIt` reads back under `andi #$ff`, destroying the
+sign and sending a negative push the wrong way. Both are ported as the engine has them, see
+**Movement rules**.
 
 ## The teleport dissolve
 
@@ -711,47 +1011,122 @@ pixel count because they are the same picture in two colours.
 
 The port draws both as their own quad two thousandths of a unit in front of the face, the plaque
 covering the middle half in each direction. There are 200 stained faces across the 28 levels and
-none is on a door. Plaques are set far more liberally by the editor — 754 faces carry the bits —
-but `dr_AddTables` is called from the wall drawing path, so the **81** with an actual wall are the
-only ones that were ever drawn.
+none is on a door. 754 faces carry plaque bits, and all but 12 of them have a wall. Byte 4 holds
+north in its top pair and west in its bottom one: the renderer masks N with `$c0` and E with
+`$30`, and `rm_CardUsed` shifts by `(~dir & 3) * 2`. Reading it the other way round, as the port
+first did, puts most of them on open faces.
 
 ## Projectiles
 
 `Anim_Objects` walks a table of 30 slots. Types 3, 4 and 5 are the fireball, electricity and
-rocket; 1, 2 and 6 are the brief impact, discharge and explosion marks. The handgun, shotgun and
-machinegun are not in there at all — they resolve in the frame the trigger is pulled.
+rocket; 1, 2 and 6 are the impact, discharge and explosion marks. Bullets are type 1 objects too,
+but only for the length of the trigger pull: `rm_HandGunUsed`, `rm_AmmoLoop` and `es_HandGun` run
+the whole collision loop at once and then either free the slot or turn it into an impact mark.
 
-Speeds are written as `400/8` and `600/8` and an object advances eight steps a frame, so the real
-figures are 400 and 600 units. That reading checks out at both ends: the handgun's 20-step hitscan
-reaches the 8000 units its own comment claims, and all three projectile types come out with an
-identical 12 cell range against their lifetimes (30, 20 and 20 frames).
+Speeds are written as `400/8` and `600/8` because the stored vector is per sub-step, and
+`Object_Collision` takes eight of them a call. Before each sub-step it ORs 1 into both components
+(`ori.l #$00010001`) so its divisions are safe, which is why a 50 really moves 51 and a probe
+along an axis drifts 8 units sideways. A flying object gets one call when it is fired and one a
+pass after that, until its counter runs out: 30 calls for a fireball, 20 for the other two, 12 000
+units each.
 
-A rocket has no splash radius. `ro_SetExplode` swaps it for an explosion mark and throws eight
-fireballs outwards along `ro_DirTab`, and those are the splash damage.
+`Object_Collision`, per sub-step: a crossing of a cell boundary is worked out to the point it
+meets the boundary and refused on that cell's face (when both axes are refused the X one wins —
+the comparison meant to choose reads `14(a1)`, the next slot); columns 1, 2 and 18 stop it in a
+190 box; the player is hit within 250 on both axes unless `sv_HitFlag` is set; an enemy within
+200, found through byte 7 of the nine surrounding cells, whatever its state. So a dying or burning
+enemy still stops shots.
+
+What a hit becomes: electricity a discharge mark; a fireball explosion mark `$0604` with SOUND2
+11; a rocket goes off. Mark lifetimes follow from their counters: an impact or discharge lasts 3
+calls of `Anim_Objects` (counter 0 to 3), an explosion `7 - counter` — 4 for `$0603`, 6 for
+`$0601`, 7 for `$0600`, 3 for `$0604`.
+
+**A rocket has no splash radius and throws nothing.** `ro_SetExplode` backs the rocket off by an
+eighth of its sub-step vector, makes it mark `$0603`, and resolves twelve fireball probes on the
+spot with `Object_Collision`: the four orthogonal `ro_DirTab` vectors for one call (600 units,
+ending as mark `$0601` if they hit nothing), the four diagonals at `700/8` per axis for one call
+(`$0600`), and the four orthogonal again for two calls (1200 units, `$0600`). A probe that hits
+anything is freed; as fireballs they set alight what they kill. Barrels act as walls meanwhile
+(`eh_FirePos+4`), so one blast cannot set off the next, and the player is spared when
+`sv_HitFlag` is up: always for his own shot (`Check_RMB` holds it), and when the rocket itself
+struck him (`ao_f2`, `es_Launcher`).
+
+The second ring is a bug in the released engine: `lea ro_DirTab,a5` has no `(pc)`, and in the
+shipped binary it resolves to the absolute address `$7020A8`, which is not the table, so its
+vectors are whatever happens to be there. The port takes the source's evident intent and reuses
+the four orthogonal entries.
+
+### Barrels
+
+Column 18 is a barrel, *beczka*. `Object_Collision` keeps the damage of up to sixteen of them in
+`oc_beczkas` by map offset: a bullet adds 5, anything else 30, and at 30 the column and the item
+in the cell go and the hit returns -1, which every caller answers with `ro_SetExplode` at the
+barrel (`rm_beczka1/2`, `.rm_beczka3`, `es_beczka1`, `ao_f2`). Electricity bounces off. A volley
+that sets one off stops there.
 
 ## Counters and the automap
 
 `NewLev3` ticks the level clock once every 50 frames, `Test_Counters` turns the energy readout red
-and beeps below 10, and zero energy ends the level as a death. There is **no energy regeneration**
+and beeps below 10, and zero energy ends the level as a death. The beep's countdown
+(`do_pikaj+2`) starts at 50 and is reloaded with 55 only when it runs out, never when the warning
+starts, so the first beep waits out what is left of it. `Test_Counters` only acts when the reading
+changes; while HOTKIWI is on it puts any change back, the energy cheat's -666 included, since
+`CheckCodes` writes `sv_Energy` alone. There is **no energy regeneration**
 anywhere in the engine: energy only ever goes down, except for medikits.
 
 Walking into a wall costs a point (`br_BumpWall`), but only on a real stride — the routine wants
 the movement vector at 120 or more, so edging along a wall is free. Some weapons cost energy to
 fire, too.
 
-`UpdateMap` keeps one bit per cell and reveals the cell underfoot plus every neighbour with no wall
-between, which is why a corridor fills in ahead of you. `Automap` paints that into a texture.
+`UpdateMap` keeps one bit per cell and reveals the cell underfoot, then for each side whose face
+byte is zero (`tst.b`, so an open door hides what is beyond) the neighbour through it, and from
+that neighbour the two squares to either side whose faces towards it are clear: up to a 3 x 3
+block. `Automap` paints that into a texture.
+
+A speed potion saves the base speed and sets it to 300 for 300 passes (`ti_power`). Two in a row
+save the first's 300 as the speed to go back to, so the base stays at 300 for the rest of the
+level; a new level starts the potion and the vodka afresh.
 
 ## Enemies
 
 The 16-byte enemy record is now fully accounted for: `+1` flags (**bit 0** selects the species —
 bit 7 is unrelated, it only asks the renderer to draw that one behind a column), `+2` energy,
-`+4`/`+6` world position, `+8` facing, `+10` walk speed, `+12` state, `+13` state counter.
+`+4`/`+6` world position, `+8` facing, `+10` walk speed, `+12` state, `+13` state counter, and
+`+14`/`+15` the knockback: the low bytes of the vector of whatever last hit it.
 
-`Move_Enemy` only simulates the 24 × 24 cells around the player, so distant enemies stand still;
-that is reproduced. Enemies have a 300-unit radius against the player's 307, refuse to walk onto
-each other via the occupancy grid in cell byte 7, and turn at random up to three times when a step
-is blocked.
+`Move_Enemy` first lists byte 7 of the 24 x 24 cells from 12 behind the player to 11 ahead on each
+axis, then serves only those, so distant enemies stand still. `me_MOVE` keeps an enemy 300 units
+off a shut face and off the player, out of a blocking column's 210 box, out of any cell byte 7
+already claims, and — `me_CORNERS` — away from a corner where either neighbouring face holds
+anything at all. Stepping into the player shoves him (`sv_AddMove`, a quarter of the
+step, see **Movement rules**), turns him by `asr.b #5` and, if the enemy is burning, costs him a point of
+energy with SOUND 13 and SCROLL 71.
+
+A blocked step is `me_RepTurn`: up to three random turns of `(r0 ^ r1) & $fe`, each retried — with
+the vector saved before the first try, not one along the new facing. So a blocked enemy does not
+move that pass, it only turns. A step that goes through turns one time in sixteen by up to 126.
+Five GetRandom words in 65 536 make it roar.
+
+`me_walk` aims through `me_angletab`, a 33-entry lookup by `(dx * 16) / dist`, rather than
+computing the bearing; angles are kept even (`andi #$1fe`). The states and their counters, which
+`dr_DrawEnemy` also draws as `counter / 4` for everything but walking:
+
+| state | counter | what happens |
+|---|---|---|
+| shooting | 60, 64, 68, 72 | fires at 68; at 72 back to walking — and the `bne` after `move.b #0` falls into `me_hited`, so it ends on 64 after a knockback step |
+| hit | 72, 76, 80 | two passes moved by twice the knockback |
+| killed | 72, 88, 92, 96 | three passes falling, still in its cell and still stopping shots; then a corpse, 32 in byte 5 (96 for the second species), sv_NrKilled, and one time in 12.8 ammunition for its weapon, item `weapon + 7` |
+| burning | 80, 84 | the energy word counts 55 down, so 56 passes of a random walk; then a burnt corpse, 64 or 128 |
+
+A kill that is not by fire splashes blood: `$40` or `$80` at random on the face of the enemy's
+cell the shot was going towards, and `$C0` on each face beside it three times in four, walls only.
+The burning enemy last set alight owns the fire sample, looped on its own voice at the volume
+`Sound_Distance2` gives each pass.
+
+`me_killed`'s drop has a second roll "if you have this weapon", which tests the weapon's condition
+word for a negative value. Conditions are never negative, so it never fires; the port keeps it as
+written.
 
 **Bit 0 set means the *first* species**, which is the opposite of what it looks like. Both
 `EnemyHitServe` (`beq.s .me01` falls through to `sv_LevelData+4`) and `dr_DrawEnemy`
@@ -764,19 +1139,26 @@ uneven: `sv_EDirSub: dc.w 128,64+32,64,64,64,64+32`. It is measured against the 
 not the bearing from the enemy to the player — the sprite is screen aligned, so an enemy at the
 edge of the view shows the same side as one dead ahead.
 
-Two places take a functional equivalent rather than a transcription, both noted in the code:
+**Line of sight** is `CanShoot` transcribed: the line cut into `dist / 1024 + 1` equal steps, each
+change of cell checked on the face it crosses, with wall 52 — the transparent one — letting the
+look through. A diagonal step looks at the four faces meeting at the corner and is only refused
+when two of them are shut.
 
-- **Line of sight** is a grid walk from shooter to target refusing the first shut face. `CanShoot`
-  unrolls the same idea per quadrant; the observable result is the same and this is legible.
-- **Randomness** uses a seeded PRNG. The original reads bytes out of Amiga ROM as its entropy
-  source, which cannot be reproduced and does not need to be.
+**Randomness** uses a seeded PRNG for `GetRandom`. The original reads words out of Amiga ROM as its
+entropy source, which cannot be reproduced and does not need to be. The sine table `sv_rotate`
+reads is loaded from data at run time and is taken as `round(32767 sin)`.
+
+One test is the port's own: `me_MOVE` checks only the destination cell's faces, and the port also
+refuses a crossing against the cell the step began in, which only differs on a one-sided face.
 
 ## Weapons
 
-Shots are **hitscan, resolved in the frame the trigger is pulled**, because that is what the
-original does: `rm_HandGunUsed` runs its whole collision loop immediately. Only slow objects
-(flames, rockets in flight) persist in `sv_ObjectTab` across frames, and those are not modelled
-yet.
+The handgun, shotgun and machinegun fire **bullets resolved in the frame the trigger is pulled**:
+real type 1 objects, 1, 3 and 2 of them, run through 20 or 25 `Object_Collision` calls at once.
+The flamer, bolter and launcher put an object into `sv_ObjectTab`, after a first collision call
+there and then; `PrepareStruct` turns them by a random 0..6. Landing within that first call is
+point blank and costs the player 5, 1 or 5 energy with the interference and `EXCITE`. The launcher
+then needs five passes to reload (`sv_Flag+8`), and asking sooner prints SCROLL 68.
 
 `EnemyHitServe` fixes the damage table and, more importantly, reveals that the header field the
 editor labels "hits" is really a **4-bit vulnerability mask**: bit 0 bullets, bit 1 fireballs,
@@ -793,14 +1175,21 @@ type.
 A fireball that finishes an enemy leaves it burning rather than simply dead. Weapons wear out:
 `DamageWeapon` knocks 0 or 1 off the condition per shot, and a weapon at 0 refuses to fire.
 
+Enemies fire through `es_EnemyShoot` with the same objects: `es_HandGun` 1, 3 or 2 bullets spread
+by `(r ^ r) asr.b #3` (-16..15), the flamer, bolter and launcher by `asr.b #5`, all started 300
+units ahead of the enemy, which is the only thing that keeps them off their shooter. They can
+miss, hit another enemy, or set off a barrel. Weapons 0 and 7 fire nothing. There is no reload:
+the wind-up and the roll in `me_walk` are all the pacing there is.
+
 Known gaps:
 - which of the 32 object sprites goes with which projectile type is paired by eye, not read from
   the offset table
 
-- knockback is decoded (enemy bytes 14/15) but not applied
-- enemy handguns are hitscan in the original too, so those enemies get a 25 frame reload to keep
-  a roomful of them from emptying an energy bar in seconds
-- wall plaques and blood decals are decoded but not yet drawn
-- card readers are parsed and can be fired, but nothing checks whether you hold the card
-- switch commands tagged "on release" are parsed and skipped; they need a held-button model
+- door 2's partly open picture follows `oc_MulD2Tab`, which is not transcribed; the renderer is
+  given an even six steps instead
+- `Test_Counters` runs at the start of each update as well as in each pass, so a change made
+  between updates (a cheat, a pickup from the front end) is seen before the first pass
+- an object `ro_SetExplode` or a shot puts into a later slot of `sv_ObjectTab` can be served by
+  `Anim_Objects` in the same pass in the original; here new objects always wait for the next pass
+- the impact mark's random height is kept (`Projectile.height`) but not drawn
 - `header+20` is assumed to be the spawn facing

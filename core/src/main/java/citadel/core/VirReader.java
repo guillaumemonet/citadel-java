@@ -83,14 +83,19 @@ public final class VirReader {
      */
     public BufferedImage extract(int base, int w, int h, int[] lut) {
         BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        int[] row = new int[w];
+        img.setRGB(0, 0, w, h, pixels(base, w, h, lut), 0, w);
+        return img;
+    }
+
+    /** The same graphic as {@link #extract}, as ARGB pixels, row major. */
+    public int[] pixels(int base, int w, int h, int[] lut) {
+        int[] out = new int[w * h];
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
-                row[x] = lut[pixel(base, x, y) & 31];
+                out[y * w + x] = lut[pixel(base, x, y) & 31];
             }
-            img.setRGB(0, y, w, 1, row, 0, w);
         }
-        return img;
+        return out;
     }
 
     /** True when every pixel of the graphic is the transparent key, i.e. the slot is unused. */

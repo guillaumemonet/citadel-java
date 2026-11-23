@@ -27,11 +27,14 @@ public final class Palette {
     }
 
     public static Palette load(File f) throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f));
+    }
+
+    public static Palette load(String name, byte[] raw) throws IOException {
         if (raw.length < SIZE * 2) {
-            throw new IOException(f + ": expected " + (SIZE * 2) + " bytes, got " + raw.length);
+            throw new IOException(name + ": expected " + (SIZE * 2) + " bytes, got " + raw.length);
         }
-        Palette p = new Palette(f.getName());
+        Palette p = new Palette(name);
         for (int i = 0; i < SIZE; i++) {
             int v = ((raw[i * 2] & 0xff) << 8) | (raw[i * 2 + 1] & 0xff);
             int r = (v >> 8) & 0xf;

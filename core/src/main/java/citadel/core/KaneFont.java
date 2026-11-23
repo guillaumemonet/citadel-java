@@ -46,7 +46,10 @@ public final class KaneFont {
     }
 
     public static KaneFont load(File f) throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f));
+    }
+
+    public static KaneFont load(String f, byte[] raw) throws IOException {
         if (raw.length < PAIR_STRIDE) {
             throw new IOException(f + ": only " + raw.length + " bytes");
         }
@@ -54,7 +57,11 @@ public final class KaneFont {
     }
 
     public static KaneFont loadFrom(File dataRoot) throws IOException {
-        return load(new File(new File(dataRoot, "INTRO/STORE"), "KANE.fnt"));
+        return loadFrom(DataSource.directory(dataRoot));
+    }
+
+    public static KaneFont loadFrom(DataSource data) throws IOException {
+        return load("INTRO/STORE/KANE.fnt", data.read("INTRO/STORE/KANE.fnt"));
     }
 
     /** How many glyph slots the file holds. */
@@ -72,6 +79,20 @@ public final class KaneFont {
             index--;
         }
         return (index < glyphs()) ? index : -1;
+    }
+
+    /**
+     * One row of a glyph's cell as the byte the font stores, for rows 0 to 15. DrukTekst and
+     * the scrollers print thirteen of them; ENDLEVEL_PART's el_Drukuj prints all sixteen
+     * ({@code moveq #15,d0}).
+     */
+    public int row(char c, int y) {
+        int index = indexOf(c);
+        if (index < 0 || y < 0 || y >= PAIR_STRIDE / 2) {
+            return 0;
+        }
+        int at = (index >> 1) * PAIR_STRIDE + (index & 1) + y * 2;
+        return at < raw.length ? raw[at] & 0xff : 0;
     }
 
     /** One glyph, true where a pixel is set. Characters the font does not hold come back blank. */

@@ -23,9 +23,10 @@ import java.util.Random;
 public final class TextTable {
 
     // Message numbers used by the port, each taken from its SCROLL call site.
+    public static final int BUMP_INSULT = 1;         // br_BumpWall, a plain wall
     public static final int BUMP_DOOR = 40;          // br_BW2
     public static final int PAUSED = 41;             // MAIN_LOOP
-    public static final int BUMP_WALL = 42;          // br_BW3
+    public static final int BUMP_OPENING_DOOR = 42;  // br_BW3
     public static final int DOOR_MOVING = 43;        // br_BW, door still animating
     public static final int SEE_COLUMN = 44;         // rm_Column2
     public static final int SEE_WALL = 47;           // rm_NoBlood
@@ -60,7 +61,11 @@ public final class TextTable {
     }
 
     public static TextTable load(File f) throws IOException {
-        String raw = new String(Io.readAll(f), "ISO-8859-1");
+        return load(Io.readAll(f));
+    }
+
+    public static TextTable load(byte[] bytes) throws IOException {
+        String raw = new String(bytes, "ISO-8859-1");
         TextTable t = new TextTable();
         // The file opens with '@', so the first split piece is empty and is not a message.
         String[] blocks = raw.split("@", -1);
@@ -72,13 +77,17 @@ public final class TextTable {
 
     /** Finds the language file next to the maps, preferring English then Polish then German. */
     public static TextTable loadFrom(File dataRoot) throws IOException {
+        return loadFrom(DataSource.directory(dataRoot));
+    }
+
+    public static TextTable loadFrom(DataSource data) throws IOException {
         for (String name : new String[]{"TEXT.ENG", "TEXT.POL", "TEXT.GER"}) {
-            File f = new File(new File(dataRoot, "GAME/Store"), name);
-            if (f.isFile()) {
-                return load(f);
+            String path = "GAME/Store/" + name;
+            if (data.has(path)) {
+                return load(data.read(path));
             }
         }
-        throw new IOException("no TEXT.* found under " + dataRoot);
+        throw new IOException("no TEXT.* found in " + data);
     }
 
     private static String[] parseBlock(String block) {
@@ -101,13 +110,24 @@ public final class TextTable {
         return lines.toArray(new String[0]);
     }
 
-    /** One message, picking at random between variants the way the engine does. */
+    /** For each message with variants, the next one to print. */
+    private final java.util.Map<Integer, Integer> nextVariant = new java.util.HashMap<Integer, Integer>();
+
+    /**
+     * One message. Variants are not picked at random: .sc_ChooseText keeps a read offset in the
+     * two bytes after the {@code ^} and moves it on each time, so they come in turn and wrap.
+     */
     public String get(int index) {
         if (index < 0 || index >= messages.size()) {
             return "";
         }
         String[] variants = messages.get(index);
-        return variants[variants.length == 1 ? 0 : rnd.nextInt(variants.length)];
+        if (variants.length == 1) {
+            return variants[0];
+        }
+        int n = nextVariant.getOrDefault(index, 0);
+        nextVariant.put(index, (n + 1) % variants.length);
+        return variants[n];
     }
 
     /** All variants of a message, for tests and for dumping. */

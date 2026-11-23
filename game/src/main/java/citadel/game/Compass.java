@@ -15,9 +15,12 @@ import com.jme3.util.BufferUtils;
 /**
  * The compass needle from the COMPASS routine.
  *
- * The original clears a 32 x 27 patch — 27 longwords, one bitplane — and draws a line from the
- * centre at (16, 13) to a point 11 pixels out, obtained by running (0, -11) through sv_rotate at
- * the player's angle. Screen Y grows downward, so that lands on the direction the player faces.
+ * The original draws a line from the centre at (16, 13) to a point 11 pixels out, obtained by
+ * running (0, -11) through sv_rotate at the player's angle, into a one plane scratch patch of 32
+ * by 27. {@code .l_RetComp} then puts the panel's own artwork back from {@code sv_CompasSav} and,
+ * with {@code moveq #1,d7}, ORs the needle into plane 0 and clears it out of planes 1 to 4: the
+ * needle is colour 1 of the complex's palette and everything else is the panel as drawn. So the
+ * overlay is the needle alone, on nothing.
  */
 public final class Compass {
 
@@ -27,10 +30,8 @@ public final class Compass {
     private static final int CENTRE_Y = 13;
     private static final int NEEDLE = 11;
 
-    private static final int BACKDROP = 0xa0101018;
-    private static final int RING = 0xff404858;
-    private static final int NEEDLE_COLOUR = 0xff40ff40;
-    private static final int PIVOT = 0xffc0c0d0;
+    /** Colour 1 of the complex's palette. */
+    private int needleColour = 0xffffffff;
 
     private final Picture picture;
     private final Texture2D texture;
@@ -59,6 +60,12 @@ public final class Compass {
         return picture;
     }
 
+    /** The complex's colour 1, which the needle is drawn in. */
+    public void setColour(int argb) {
+        needleColour = argb;
+        lastAngle = -1;
+    }
+
     public void update(GameState game) {
         if (game.angle == lastAngle) {
             return;
@@ -69,26 +76,13 @@ public final class Compass {
     }
 
     private void paint(int angle) {
-        java.util.Arrays.fill(argb, BACKDROP);
-
-        // a ring to read the needle against
-        for (int y = 0; y < H; y++) {
-            for (int x = 0; x < W; x++) {
-                int dx = x - CENTRE_X;
-                int dy = y - CENTRE_Y;
-                int r2 = dx * dx + dy * dy;
-                if (r2 >= 11 * 11 && r2 <= 13 * 13) {
-                    argb[y * W + x] = RING;
-                }
-            }
-        }
+        java.util.Arrays.fill(argb, 0);
 
         // sv_rotate(0, -11) at the player's angle, with screen Y growing downward
         double a = angle * 2.0 * Math.PI / 512.0;
         int tipX = CENTRE_X + (int) Math.round(-NEEDLE * Math.cos(a));
         int tipY = CENTRE_Y + (int) Math.round(-NEEDLE * Math.sin(a));
-        line(CENTRE_X, CENTRE_Y, tipX, tipY, NEEDLE_COLOUR);
-        argb[CENTRE_Y * W + CENTRE_X] = PIVOT;
+        line(CENTRE_X, CENTRE_Y, tipX, tipY, needleColour);
     }
 
     /** The engine draws the needle with its own Bresenham; any straight line will do here. */

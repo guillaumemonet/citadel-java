@@ -85,21 +85,19 @@ public final class LevelGeometry {
     }
 
     /**
-     * Slides each moving door up into the ceiling. The original redraws a partially open door in
-     * place (oc_DrawOpen); a vertical slide is the natural 3D equivalent and needs no new mesh.
+     * Slides each door up into the ceiling as far as the rules say it is open. The original
+     * redraws a partially open door in place (oc_DrawOpen), from one texture per door type that
+     * every face holding the animating value shares; a vertical slide is the natural 3D
+     * equivalent and needs no new mesh. Asking per face covers the automatic channels, the
+     * priority doors switches and cards queue, and doors a channel left behind open or half way.
      */
     public void syncDoors(citadel.core.GameState game) {
-        for (citadel.core.GameState.DoorSlot slot : game.doorSlots()) {
-            if (!slot.isActive()) {
-                continue;
-            }
-            float lift = slot.openFraction() * WALL_H;
-            raise(slot.cellX(), slot.cellY(), slot.dir(), lift);
-            int nx = slot.cellX() + Level.DX[slot.dir()];
-            int ny = slot.cellY() + Level.DY[slot.dir()];
-            if (Level.inside(nx, ny)) {
-                raise(nx, ny, Level.OPPOSITE[slot.dir()], lift);
-            }
+        for (Map.Entry<Integer, Geometry> e : doorFaces.entrySet()) {
+            int key = e.getKey();
+            int dir = key & 3;
+            int cell = key >> 2;
+            float lift = game.doorOpenFraction(cell % Level.GRID, cell / Level.GRID, dir) * WALL_H;
+            e.getValue().setLocalTranslation(0f, lift, 0f);
         }
     }
 
@@ -178,13 +176,6 @@ public final class LevelGeometry {
         int plaque = GfxLayout.plaqueSprite(GfxLayout.ANIMATED_PLAQUE_SPRITE, phase);
         if (animatedPlaque != null && assets.exists(complex, "blood", plaque)) {
             animatedPlaque.setMaterial(assets.decal(complex, "blood", plaque));
-        }
-    }
-
-    private void raise(int x, int y, int dir, float lift) {
-        Geometry g = doorFaces.get(faceKey(x, y, dir));
-        if (g != null) {
-            g.setLocalTranslation(0f, lift, 0f);
         }
     }
 
@@ -455,10 +446,18 @@ public final class LevelGeometry {
                 if (col != 0) {
                     addColumn(node, x, y, col);
                 }
+                // dr_checkDEAD: the top bits of byte 5, column sprite 24 + n, always drawn down
+                int corpse = level.corpse(x, y);
+                if (corpse != 0) {
+                    addSprite(node, "column", GfxLayout.spriteIndexFor(24 + corpse),
+                            x, y, 0.6f, WALL_H / 2f, WALL_H * 0.25f, "corpse");
+                }
                 int item = level.item(x, y);
                 if (item != 0) {
+                    // dr_checkITEM: bit 5 stands the item half a wall higher, on a table
+                    float centre = level.itemRaised(x, y) ? 0.25f + WALL_H / 2f : 0.25f;
                     addSprite(node, "item", GfxLayout.spriteIndexFor(item),
-                            x, y, 0.5f, 0.5f, 0.25f, "item");
+                            x, y, 0.5f, 0.5f, centre, "item");
                 }
             }
         }
@@ -470,8 +469,10 @@ public final class LevelGeometry {
     private Node enemyNode;
 
     /**
-     * Positions one billboard per living enemy and picks its frame from sv_EnemyDirTab, so an
-     * enemy walking away shows its back.
+     * Positions one billboard per enemy still in the table and picks its frame as dr_DrawEnemy
+     * does: sv_EnemyDirTab while walking, so an enemy walking away shows its back, and the state
+     * counter / 4 otherwise, which is how shooting, recoil, burning and falling are animated.
+     * Once one is gone its corpse is part of the level geometry instead.
      */
     public void syncEnemies(citadel.core.GameState game) {
         if (enemyNode == null) {
@@ -480,7 +481,7 @@ public final class LevelGeometry {
         }
         for (citadel.core.Enemy e : game.enemies()) {
             Geometry g = enemyViews.get(e.slot);
-            if (e.isDead()) {
+            if (e.isGone()) {
                 if (g != null) {
                     g.getParent().removeFromParent();
                     enemyViews.remove(e.slot);
@@ -488,7 +489,7 @@ public final class LevelGeometry {
                 continue;
             }
             String group = (e.species == 0) ? "enemy1" : "enemy2";
-            int frame = e.frame(game.angle, game.animPhase());
+            int frame = e.frame(game.angle, game.walkPhase());
             if (!assets.exists(complex, group, frame)) {
                 frame = 0;
             }

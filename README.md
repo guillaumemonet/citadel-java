@@ -20,7 +20,7 @@ game rules.
     <td><img src="docs/images/hangar.png" alt="The server's menu in the hangar"></td>
   </tr>
   <tr>
-    <td align="center"><sub>The title screen, after the intro animation</sub></td>
+    <td align="center"><sub>The cover picture the intro ends on</sub></td>
     <td align="center"><sub>The server's menu, in its own font, over the hangar</sub></td>
   </tr>
   <tr>
@@ -45,7 +45,7 @@ game rules.
   </tr>
   <tr>
     <td align="center"><sub>The interference burst when a shot lands</sub></td>
-    <td align="center"><sub>The original death picture</sub></td>
+    <td align="center"><sub>The death sequence's first picture</sub></td>
   </tr>
 </table>
 
@@ -54,25 +54,26 @@ game rules.
 ### From a package
 
 `gradle :game:jpackage` builds a self-contained folder with its own Java runtime (see
-[Packaging](#packaging)). It holds no game data: on first start it offers to download the
-original data from [Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel), or to use a copy
-already on disk, and converts it once.
+[Packaging](#packaging)). It holds no game data: on first start it looks for the five original
+Citadel disks as `.adf` images, and offers to download them or to point at a folder that holds
+them.
 
 ### From source
 
-Needs a JDK 21 toolchain and the original data, which is not part of this repository: check out
-Amiga-Citadel next to it, so that its `Code/` and `Data/` sit in `../Amiga-Citadel`, or point the
-build elsewhere with `-Poriginal=<path>`. Gradle downloads jMonkeyEngine on first build.
+Needs a JDK 21 toolchain and the five original disk images, which are not part of this
+repository: put the `.adf` files in `../adf`, or point the build elsewhere with `-Padf=<path>`.
+Their names do not matter, each disk is recognised by its boot block. Gradle downloads
+jMonkeyEngine on first build.
 
 ```sh
-git clone https://github.com/pawelmat/Amiga-Citadel ../Amiga-Citadel
-gradle :tools:convert              # convert the original data into build/assets
-gradle :game:run                   # start from the intro
-gradle :game:run --args=LEVEL05B   # or straight into a level
+gradle :game:run                   # the cover, then the server's menu in the hangar
+gradle :game:run --args=LEVEL05B   # or straight into a level, and on through the campaign
 ```
 
-Conversion has to run once before the game: textures and sounds come from `build/assets`, while
-level data is read straight out of the original `.MAP` files.
+Nothing is converted ahead of time: maps, graphics, palettes, sounds, fonts and screens are read
+off the disks and decoded in memory as the game needs them (see `citadel.core.disk`). The
+Amiga-Citadel sources, as a sibling checkout in `../Amiga-Citadel` (or `-Poriginal=<path>`), are
+only needed by the tools and by the tests that hold the disks against the repository's `Data/`.
 
 ### Controls
 
@@ -83,10 +84,16 @@ level data is read straight out of the original `.MAP` files.
 | `E`, right mouse button | use the wall you are facing |
 | left mouse button, `Ctrl` | fire |
 | `1` … `6`, `0` | pick a weapon, back to the bare hand |
+| `7`, `8`, `9` | take the red, green or blue card in hand; fire it at a card reader |
 | `M` | automap |
 | `Z` | interference off |
+| `P` | pause |
+| `Esc` | leave the level for the hangar, as the original does |
 | `-` `+` | game pace |
-| `F5` / `F9` | save / load menu |
+| `F5` / `F9` | quick save / load, a port extra (see below) |
+
+In the server's screens the arrows (or W/S/A/D) move, and ENTER, SPACE, ESC or a mouse button
+picks, which is what SERVER's keyboard handler does with them. ESC on the cover picture quits.
 
 The original's seven cheat codes work too; [PORTING.md](PORTING.md#the-cheat-codes) explains how
 they were recovered from the obfuscated tables.
@@ -108,22 +115,28 @@ they were recovered from the obfuscated tables.
 - **Status panel** — the original panel with every widget where the engine puts it: energy,
   heart monitor and the exhaustion behind it, compass, weapon reveal, ammunition, ID cards, and
   the scrolling message line with the original texts.
-- **Campaign** — the intro, the title screen, the server's menu in the hangar, MAPA between
-  complexes, the level sequence with the inventory carried across, the death sequence, and the
-  victory card.
-- **Sound** — the 25 effects, positioned in the world for doors and enemies.
-- **Saves** — a five-slot menu over the original 768-byte `Savegame.DAT` format.
+- **The front end** — SERVER's own flow, run as the script it is: the server's menu in the
+  hangar (with its panel dissolve, flashing cursor and options), LOAD GAME, TRAINING, the
+  scrolling credits, MAPA between complexes, the end-of-level report with its offer to save,
+  the death sequence and GAME OVER, and the end: three animations and the scrolling epilogue.
+- **Sound** — the 25 effects, positioned in the world for doors and enemies, and the five
+  ProTracker songs the server plays, rendered by a ProTracker player in `core`.
+- **Saves** — `Savegame.DAT` byte for byte: STRUCTURE copied into a slot after a level, as
+  ENDLEVEL_PART does, and loaded from the hangar's LOAD GAME. F5 and F9 add a quick save and
+  load the original does not have: F5 writes the slot ENDLEVEL_PART would have written before
+  this level, so loading it starts the level over.
 
-Not done yet: the pushes that go with a hit (`sv_AddMove` and the `sv_LastMove` rebound).
-[PORTING.md](PORTING.md#state) keeps the full list.
+Not done yet: the intro (the animations are on disks 1 to 3 but stitched together by the intro
+player's own loads), and the pushes that go with a hit (`sv_AddMove` and the `sv_LastMove`
+rebound). [PORTING.md](PORTING.md#state) keeps the full list.
 
 ## How it is built
 
 | module | contents | dependencies |
 |---|---|---|
 | `core` | data formats, level model, game rules | none |
-| `tools` | asset converter and inspectors | `core`, `java.desktop` |
-| `game` | jMonkeyEngine front end | `core`, `tools`, jME 3.9 |
+| `tools` | exporter and inspectors, for checking the formats | `core`, `java.desktop` |
+| `game` | jMonkeyEngine front end | `core`, jME 3.9 |
 
 `core` has no dependency on jMonkeyEngine or on `java.desktop`, so the whole rule set runs
 headless. `gradle :core:test` exercises it against the shipped maps, including a random walk of
@@ -131,8 +144,8 @@ headless. `gradle :core:test` exercises it against the shipped maps, including a
 
 <img src="docs/images/level-overview.png" alt="Overview of LEVEL01A" width="400" align="right">
 
-The converter also writes a readable dump and an overview of every level into
-`build/assets/maps` — walls in white, doors in blue, switches in amber, columns in grey, items in
+The exporter (`gradle :tools:convert`, which reads Amiga-Citadel's `Data/`) writes a readable
+dump and an overview of every level into `build/assets/maps` — walls in white, doors in blue, switches in amber, columns in grey, items in
 green, enemies in red, the spawn as a blue square and the exit as a green one — which is how the
 decoding was checked against the game.
 
@@ -142,8 +155,10 @@ byte because the chunky-to-planar macro consumes bit 7 first. Cell values index 
 sprite tables 1-based.
 
 For verification without a window in the way, `gradle :game:shot` renders one frame to
-`build/shots` and exits: `-Plevel=LEVEL03C`, `-Pscreen=title|hangar|map|dead|victory`,
-`-Pat=x,y,angle`, `-Pcheat=HOTKISS`. Every screenshot on this page was made that way.
+`build/shots` and exits: `-Plevel=LEVEL03C`,
+`-Pscreen=title|hangar|slots|credits|map|endlevel|dead|gameover|victory|epilogue`,
+`-Pat=x,y,angle`, `-Pcheat=HOTKISS`, `-Pframe=N` to take it later (the front end advances four
+VBLANKs a frame on that path). Every screenshot on this page was made that way.
 
 <br clear="right">
 
@@ -159,10 +174,9 @@ the runtime. Two things keep that from being twice the size — `--add-modules` 
 JDK down to what jME actually uses, and dropping the LWJGL natives for every platform except the
 one being built for.
 
-On first start the game asks whether to download the original data from
-[Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel) (pinned to the commit the port was
-checked against, about 20 MB), or to use a checkout already on disk. It then converts it once, and
-keeps the data, the converted assets and the save file in a per-user folder:
+On first start the game asks whether to download the five disk images (a zip of about 4 MB from
+amiga500archive.com), or to use a folder that already holds them. It keeps the downloaded disks
+and the save file in a per-user folder:
 `%LOCALAPPDATA%\Citadel` on Windows, `~/Library/Application Support/Citadel` on macOS,
 `~/.local/share/citadel` elsewhere. Delete that folder to start over.
 

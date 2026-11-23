@@ -33,7 +33,10 @@ public final class WeaponChange {
     }
 
     public static WeaponChange load(File f) throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f));
+    }
+
+    public static WeaponChange load(String f, byte[] raw) throws IOException {
         if (raw.length < SIZE * 2) {
             throw new IOException(f + ": expected " + (SIZE * 2) + " bytes, got " + raw.length);
         }
@@ -45,7 +48,11 @@ public final class WeaponChange {
     }
 
     public static WeaponChange loadFrom(File dataRoot) throws IOException {
-        return load(new File(new File(dataRoot, "GAME/Store"), "CHAOSTAB.DAT"));
+        return loadFrom(DataSource.directory(dataRoot));
+    }
+
+    public static WeaponChange loadFrom(DataSource data) throws IOException {
+        return load("GAME/Store/CHAOSTAB.DAT", data.read("GAME/Store/CHAOSTAB.DAT"));
     }
 
     public int entry(int i) {

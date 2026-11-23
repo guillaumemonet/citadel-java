@@ -42,7 +42,10 @@ public final class BombGfx {
     }
 
     public static BombGfx load(File f) throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f));
+    }
+
+    public static BombGfx load(String f, byte[] raw) throws IOException {
         int want = HEIGHT * PLANES * ROW;
         if (raw.length < want) {
             throw new IOException(f + ": expected " + want + " bytes, got " + raw.length);
@@ -51,7 +54,11 @@ public final class BombGfx {
     }
 
     public static BombGfx loadFrom(File dataRoot) throws IOException {
-        return load(new File(new File(dataRoot, "GAME/Store"), "Bomba.rawb"));
+        return loadFrom(DataSource.directory(dataRoot));
+    }
+
+    public static BombGfx loadFrom(DataSource data) throws IOException {
+        return load("GAME/Store/Bomba.rawb", data.read("GAME/Store/Bomba.rawb"));
     }
 
     /**

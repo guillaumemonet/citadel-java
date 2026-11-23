@@ -52,11 +52,14 @@ public final class MapFile {
     }
 
     public static MapFile load(File f) throws IOException {
-        byte[] raw = Io.readAll(f);
+        return load(f.getName(), Io.readAll(f));
+    }
+
+    public static MapFile load(String name, byte[] raw) throws IOException {
         if (raw.length < EVENTS_OFF) {
-            throw new IOException(f + ": too short for a Citadel map (" + raw.length + " bytes)");
+            throw new IOException(name + ": too short for a Citadel map (" + raw.length + " bytes)");
         }
-        return new MapFile(f.getName(), raw);
+        return new MapFile(name, raw);
     }
 
     // ---------------------------------------------------------------- grid
@@ -86,9 +89,13 @@ public final class MapFile {
         return (wall(x, y, dir) >> 6) & 3;
     }
 
-    /** Byte 4: two bits per direction selecting a plaque or card slot on that wall. */
+    /**
+     * Byte 4: two bits per direction selecting a plaque or card slot on that wall. North is the
+     * top pair and west the bottom one: the renderer masks N with $c0 and E with $30, and
+     * rm_CardUsed shifts by {@code (~dir & 3) * 2}.
+     */
     public int plaque(int x, int y, int dir) {
-        return (cellByte(x, y, 4) >> (dir * 2)) & 3;
+        return (cellByte(x, y, 4) >> ((3 - dir) * 2)) & 3;
     }
 
     /** Byte 5, low 5 bits: column index, 0 for none. */
@@ -101,9 +108,17 @@ public final class MapFile {
         return (cellByte(x, y, 5) >> 5) & 7;
     }
 
-    /** Byte 6, low 6 bits: item index, 0 for none. */
+    /**
+     * Byte 6, low 5 bits: item index, 0 for none. Take_Items and rm_item mask with 31; bit 5 is
+     * not part of the item, see {@link #itemRaised}.
+     */
     public int item(int x, int y) {
-        return cellByte(x, y, 6) & 0x3f;
+        return cellByte(x, y, 6) & 0x1f;
+    }
+
+    /** Byte 6, bit 5: the item stands up on something rather than on the floor (dr_checkITEM). */
+    public boolean itemRaised(int x, int y) {
+        return (cellByte(x, y, 6) & 0x20) != 0;
     }
 
     /** Byte 6, bit 6: the cell cannot be walked through and nearby doors stay shut. */

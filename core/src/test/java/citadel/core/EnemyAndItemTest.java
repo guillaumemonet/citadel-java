@@ -56,8 +56,13 @@ class EnemyAndItemTest {
         game.posY = spot[1] * Level.CELL_UNITS + Level.CELL_UNITS / 2;
         game.update(0, 0, 0, TICK);
 
-        assertTrue(game.inventory.current != Inventory.HAND, "the weapon was not selected");
-        assertTrue(game.inventory.owned[game.inventory.current]);
+        // Take_Items writes the weapon's condition and leaves the hand alone
+        assertEquals(Inventory.HAND, game.inventory.current, "a pickup must not switch weapons");
+        boolean armed = false;
+        for (int w = 1; w < Inventory.WEAPON_COUNT; w++) {
+            armed |= game.inventory.owned[w] && game.inventory.condition[w] > 0;
+        }
+        assertTrue(armed, "the weapon was not picked up");
     }
 
     /** An item further than 220 units from the cell centre is out of reach. */
@@ -85,7 +90,9 @@ class EnemyAndItemTest {
         for (int y = 1; y < Level.GRID - 1; y++) {
             for (int x = 1; x < Level.GRID - 1; x++) {
                 for (int d = 0; d < 4; d++) {
-                    if (level.hasWall(x, y, d) && !level.isPassable(x, y, d)) {
+                    // wall 52 is see-through to CanShoot (cs_ChkDoors), so not that one
+                    if (level.hasWall(x, y, d) && !level.isPassable(x, y, d)
+                            && (level.wallValue(x, y, d) & 62) != 52) {
                         wall = new int[]{x, y, d};
                         break outer;
                     }

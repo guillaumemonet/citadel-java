@@ -36,9 +36,9 @@ class WeaponTest {
     void theBareHandFallsThroughToTheUseAction() throws Exception {
         GameState game = new GameState(load("LEVEL01A.MAP"));
         assertEquals(Inventory.HAND, game.inventory.current);
-        // nothing to use where the player spawns, so it reports a miss rather than firing
+        // no switch where the player spawns: rm_HandUsed only says what is there
         assertFalse(game.fire());
-        assertTrue(game.drainLog().toString().contains("nothing to use"));
+        assertFalse(game.drainLog().isEmpty(), "the hand should describe what it touches");
     }
 
     @Test

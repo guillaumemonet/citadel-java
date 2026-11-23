@@ -92,12 +92,19 @@ public final class SoundTable {
     public static final int TAKE_ITEM = 22;      // SOUND 23, weapon and card pickups
     public static final int TAKE_AID = 14;       // SOUND 15, medikit, power and vodka
     public static final int PLAYER_HURT = 12;    // SOUND 13, oc_PlayerHit
+    /**
+     * The fire loop. eh_Burning starts sound_list entry 13 straight on audio channel 2, without
+     * the macro and so 0-based, and me_burning sets its volume each pass; it is "fire", not the
+     * "arrgh" that SOUND 13 plays.
+     */
+    public static final int FIRE_LOOP = 13;
     public static final int BUMP = 0;            // SOUND 1,  walking into a wall
     public static final int CARD = 20;           // SOUND 21, using a card
     public static final int BEEP = 21;           // SOUND 22, do_pikaj low-energy warning
     /** Enemy roars, picked at random from this run of four (SOUND4 with d2 in 18..21). */
+    /** en2: me_hited plays en2..en4 (SOUND 18..20), me_killed en1..en4 (SOUND 17..20). */
     public static final int ENEMY_ROAR_FIRST = 17;
-    public static final int ENEMY_ROAR_COUNT = 4;
+    public static final int ENEMY_ROAR_COUNT = 3;
 
     /** Fire sound for a weapon slot, 0 being the bare hand. */
     public static int fireSound(int weaponSlot) {
@@ -116,6 +123,16 @@ public final class SoundTable {
     }
 
     /** Wraps signed 8 bit mono PCM into a WAV container (unsigned 8 bit, as WAV requires). */
+    /**
+     * The sample bank as the engine has it at {@code sv_SAMPLES}, from {@code ST.DAT}. On the disks
+     * and in the repository ST.DAT is a packed block, which SERVER unpacks before starting the
+     * engine; the offsets in {@link #ALL} are into the unpacked bank.
+     */
+    public static byte[] samples(byte[] stDat) throws IOException {
+        return citadel.core.disk.PowerPacker.isBlock(stDat, 0)
+                ? citadel.core.disk.PowerPacker.block(stDat, 0) : stDat;
+    }
+
     public static byte[] toWav(byte[] pcmSigned, int off, int len, int rate) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream(len + 44);
         int dataLen = Math.max(0, Math.min(len, pcmSigned.length - off));

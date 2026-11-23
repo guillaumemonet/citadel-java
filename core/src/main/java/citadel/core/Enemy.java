@@ -14,7 +14,11 @@ package citadel.core;
  *   +10 walk speed, engine units per frame
  *   +12 state: 0 walking, 1 hit, 2 killed, 3 burning, 4 shooting
  *   +13 state counter
+ *   +14 knockback X, +15 knockback Y: the low bytes of the vector of the last thing that hit it
  * </pre>
+ *
+ * The counter doubles as the sprite: dr_DrawEnemy draws {@code counter / 4} for every state but
+ * walking, so the counter values below are frame numbers times four.
  */
 public final class Enemy {
 
@@ -24,16 +28,29 @@ public final class Enemy {
     public static final int BURNING = 3;
     public static final int SHOOTING = 4;
 
-    /** How close an enemy's centre may get to a wall, from the {@code cmpi #300} tests. */
+    /** How close an enemy's centre may get to a wall or the player, from me_MOVE's {@code cmpi #300}. */
     public static final int RADIUS = 300;
+    /**
+     * Object_Collision's box around an enemy: {@code cmpi #200} on both axes (the comment beside
+     * it still says 256). Shots use this, not {@link #RADIUS}.
+     */
+    public static final int HIT_BOX = 200;
     /** Half-width of the box a column denies it, from {@code cmpi #512-210}. */
     public static final int COLUMN_HALF = 210;
-    /** Frames a shoot wind-up lasts: the counter starts at 60 and fires at 68, 4 per frame. */
+    /** me_walk and me_ShootIt start the wind-up at 60; me_shootON fires at 68 (frames 15..17). */
     public static final int SHOOT_COUNTER = 60;
+    /** EnemyHitServe: {@code move.b #72,13(a4)} for a hit and a kill alike (frame 18). */
+    public static final int HIT_COUNTER = 72;
+    /** eh_Burning: {@code move.b #80,13(a4)}, then me_burning toggles 80/84 (frames 20, 21). */
+    public static final int BURN_COUNTER = 80;
+    /** eh_Burning: {@code move #55,2(a4)}, the burn counted down in the energy word. */
+    public static final int BURN_ENERGY = 55;
 
     /** Slot number, which is what a cell's byte 7 refers to. */
     public final int slot;
     public final int species;
+    /** +1: 1 for the first species, 2 for the second in every shipped map. */
+    public final int flags;
     public int x;
     public int y;
     public int angle;
@@ -41,8 +58,14 @@ public final class Enemy {
     public int energy;
     public int state;
     public int counter;
-    /** Frames left before this one can shoot again; see GameState.ENEMY_RELOAD. */
-    public int reload;
+    /** +14 and +15, signed bytes; me_hited and me_killed move the enemy by twice these. */
+    public int knockX;
+    public int knockY;
+    /**
+     * True once the slot has been cleared ({@code move #0,(a3)}) at the end of me_killed or
+     * me_burning: the corpse is on the map and the enemy is no more.
+     */
+    public boolean gone;
 
     public Enemy(Level.EnemySpawn spawn) {
         this.slot = spawn.slot;
@@ -50,11 +73,14 @@ public final class Enemy {
         this.x = spawn.worldX;
         this.y = spawn.worldY;
         byte[] raw = spawn.raw;
+        this.flags = Io.u8(raw, 1);
         this.energy = Io.u16(raw, 2);
         this.angle = Io.u16(raw, 8) & 511;
         this.speed = Io.u16(raw, 10);
         this.state = Io.u8(raw, 12);
         this.counter = Io.u8(raw, 13);
+        this.knockX = raw[14];
+        this.knockY = raw[15];
     }
 
     public int cellX() {
@@ -65,12 +91,18 @@ public final class Enemy {
         return (y / Level.CELL_UNITS) & 63;
     }
 
+    /** Killed, whether still falling or already a corpse on the map. */
     public boolean isDead() {
-        return state == KILLED;
+        return state == KILLED || gone;
     }
 
     public boolean isAlive() {
-        return state != KILLED;
+        return !isDead();
+    }
+
+    /** Off the board: nothing left to draw but the corpse in the cell. */
+    public boolean isGone() {
+        return gone;
     }
 
     /**
@@ -101,12 +133,18 @@ public final class Enemy {
     }
 
     /**
-     * Sprite frame for the current facing and walk phase, via sv_EnemyDirTab.
+     * Sprite frame, from dr_DrawEnemy.
      *
-     * The walk phase is sv_WalkState, which is global and advanced once per pass of MAIN_LOOP by
-     * sv_DoAnims, so every enemy on screen steps in time.
+     * A walking enemy ({@code tst.b 12(a4)} zero) goes through de_WALK: sv_EnemyDirTab by view
+     * direction and sv_WalkState, which is global and advanced once per pass of MAIN_LOOP by
+     * sv_DoAnims, so every enemy on screen steps in time. Any other state draws the counter
+     * itself, {@code move.b 13(a4),d4}: 15..17 shooting, 18..19 hit, 20..21 burning and 22..23
+     * falling dead.
      */
     public int frame(int viewAngle, int walkPhase) {
+        if (state != WALKING) {
+            return (counter & 0xff) / 4;
+        }
         int dir = viewDirection(viewAngle);
         return GfxLayout.ENEMY_DIR_TAB[dir * 4 + (walkPhase & 3)] / 4;
     }

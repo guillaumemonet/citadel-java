@@ -113,10 +113,14 @@ class CountersAndMapTest {
         game.inventory.energy = -9;
         assertTrue(game.isEnergyCritical());
         game.drainSounds();
-        game.update(0, 0, 0, TICK);
+        // do_pikaj+2 starts at 50 and is only reloaded when it runs out, so the first beep
+        // comes a second in
         boolean beeped = false;
-        for (GameState.SoundEvent e : game.drainSounds()) {
-            beeped |= e.index == SoundTable.BEEP;
+        for (int i = 0; i < 20; i++) {
+            game.update(0, 0, 0, TICK);
+            for (GameState.SoundEvent e : game.drainSounds()) {
+                beeped |= e.index == SoundTable.BEEP;
+            }
         }
         assertTrue(beeped, "the low-energy warning did not sound");
     }

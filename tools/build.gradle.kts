@@ -45,3 +45,16 @@ tasks.register<JavaExec>("iff") {
     classpath = sourceSets["main"].runtimeClasspath
     args((project.findProperty("args") as String? ?: "").split(" ").filter { it.isNotEmpty() })
 }
+
+// The tools tests check core decoders against the IFF readers that live here.
+dependencies {
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
+    testLogging {
+        events("passed", "failed", "skipped")
+    }
+}

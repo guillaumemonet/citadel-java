@@ -101,6 +101,52 @@ public final class Campaign {
         return stages.get(i + 1);
     }
 
+    /** ETAPY itself, four bytes a complex: letters, then 0 (next complex), 1 (the end) or 2. */
+    private static final byte[] ETAPY = {
+        'A', 'B', 2, 0,
+        'A', 'B', 'C', 0,
+        'A', 'B', 'C', 0,
+        'A', 'B', 'C', 0,
+        'A', 'B', 'C', 0,
+        'A', 'B', 'C', 0,
+        'A', 'B', 'C', 0,
+        'A', 1, 0, 0,
+    };
+
+    /** What LevelLoop decides to do next. */
+    public enum Next { PLAY, MAP, END }
+
+    /** LevelLoop's decision, and the map when it is to play one. */
+    public record Step(Next next, String mapName) {
+    }
+
+    /**
+     * LevelLoop, run on STRUCTURE: {@code addi #1,62(a2)} moves on a level, and the ETAPY byte
+     * there says what that means. A letter is a map to play; 0 sends the player to MAPA to
+     * choose the next complex; 1 is the end of the game (END_PART2); the 2 after complex 1 runs
+     * the protection check ({@code SprawdzZab}) and then goes to MAPA as 0 does. When the byte
+     * after a letter is 1, the level is the last one and STRUCTURE+92 gets "KANE".
+     *
+     * Since a save is taken after a level, with +62 counting it, loading a slot goes through
+     * here too: the level after the one saved, or MAPA when that was the last of its complex.
+     */
+    public static Step levelLoop(Structure s) {
+        int complex = Math.max(1, Math.min(8, s.complex()));
+        s.setLevel(s.level() + 1);
+        int at = (complex - 1) * 4 + s.level() - 1;
+        int code = (at >= 0 && at < ETAPY.length) ? ETAPY[at] : 0;
+        if (code == 0 || code == 2) {
+            return new Step(Next.MAP, null);
+        }
+        if (code == 1) {
+            return new Step(Next.END, null);
+        }
+        if (at + 1 < ETAPY.length && ETAPY[at + 1] == 1) {
+            s.markLastLevel();
+        }
+        return new Step(Next.PLAY, String.format("LEVEL%02d%c.MAP", complex, (char) code));
+    }
+
     /** Resolves a stage against a maps directory, or null when the file is absent. */
     public File file(File mapsDir, Stage stage) {
         File f = new File(mapsDir, stage.mapName());

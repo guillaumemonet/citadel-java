@@ -177,27 +177,31 @@ class AnimationTest {
     @Test
     @DisplayName("a plaque is only ever drawn on a face that has a wall")
     void plaquesNeedAWall() throws Exception {
-        // the editor sets the plaque bits freely: across LEVEL01A most of them are on open faces,
-        // which dr_AddTables never reaches because it is called from the wall drawing path
-        Level level = load("LEVEL01A.MAP");
+        // byte 4 holds N in its top pair and W in its bottom one; read that way, the plaques sit
+        // on walls (read the other way round, most would land on open faces)
+        File[] maps = TestData.maps().listFiles((dir, n) -> n.matches("LEVEL0[1-8][A-Z][.]MAP"));
+        Assumptions.assumeTrue(maps != null && maps.length > 0, "original Data folder not present");
         int withWall = 0;
         int without = 0;
-        for (int y = 0; y < Level.GRID; y++) {
-            for (int x = 0; x < Level.GRID; x++) {
-                for (int d = 0; d < 4; d++) {
-                    if (level.wallPlaque(x, y, d) == 0) {
-                        continue;
-                    }
-                    if (level.hasWall(x, y, d)) {
-                        withWall++;
-                    } else {
-                        without++;
+        for (File f : maps) {
+            Level level = Level.load(f);
+            for (int y = 0; y < Level.GRID; y++) {
+                for (int x = 0; x < Level.GRID; x++) {
+                    for (int d = 0; d < 4; d++) {
+                        if (level.wallPlaque(x, y, d) == 0) {
+                            continue;
+                        }
+                        if (level.hasWall(x, y, d)) {
+                            withWall++;
+                        } else {
+                            without++;
+                        }
                     }
                 }
             }
         }
-        assertTrue(without > withWall,
-                "most plaque bits are on open faces and are never drawn");
+        assertTrue(withWall > 10 * without,
+                withWall + " plaques on walls, " + without + " on open faces");
         assertTrue(withWall > 0, "but not all of them");
     }
 }

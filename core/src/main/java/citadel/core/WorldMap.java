@@ -79,8 +79,18 @@ public final class WorldMap {
     public static final String NO_ACCESS_TEXT = " THIS COMPLEX IS STILL INACCESSIBLE!  ";
     public static final String NEED_BOMB_TEXT = "YOU MUST HAVE THE WHOLE BOMB TO ENTER!";
 
+    /** OKtext, with KompNames2 copied in at 9+11 once a complex is chosen. */
+    public static final String CHOSEN_TEXT = "             CHOSEN             ";
+
+    /** {@code move #150,d0} after "CHOSEN": three seconds before the map fades out. */
+    public static final int CHOSEN_VBLANKS = 151;
+    /** {@code move #110,d0} at ma_uf: how long a refusal stays up. */
+    public static final int REFUSAL_VBLANKS = 111;
+
     /** STRUCTURE+64 onward, one byte a complex, indexed from 1. */
     private final boolean[] done = new boolean[9];
+    /** STRUCTURE+98, counted up on the way into MAPA rather than worked out from {@link #done}. */
+    private int taken;
     private int choice;
 
     public int choice() {
@@ -101,6 +111,32 @@ public final class WorldMap {
         if (complex >= 1 && complex < done.length) {
             done[complex] = true;
         }
+        taken++;
+    }
+
+    /** Reads which complexes have fallen out of STRUCTURE, forgetting whatever came before. */
+    public void load(Structure s) {
+        for (int c = 1; c < done.length; c++) {
+            done[c] = s.isDone(c);
+        }
+        taken = s.taken();
+    }
+
+    /**
+     * MAPA's way in: the complex in STRUCTURE+60 is the one just finished, so it is marked off
+     * and counted, and the cursor starts where Kon1Tab says.
+     */
+    public void enter(Structure s) {
+        int complex = s.complex();
+        s.markDone(complex);
+        load(s);
+        setChoice(CURSOR_AFTER[Math.max(0, Math.min(7, complex - 1))]);
+    }
+
+    /** ma_NieCen's way out: Kon2Tab gives STRUCTURE+60 its new complex and +62 starts at 0. */
+    public void choose(Structure s) {
+        s.setComplex(chosenComplex());
+        s.setLevel(0);
     }
 
     public boolean isDone(int complex) {
@@ -109,13 +145,7 @@ public final class WorldMap {
 
     /** STRUCTURE+98, which MAPA counts up and the centre checks for seven. */
     public int complexesTaken() {
-        int n = 0;
-        for (int c = 1; c < done.length; c++) {
-            if (done[c]) {
-                n++;
-            }
-        }
-        return n;
+        return taken;
     }
 
     public Status statusOf(int target) {
@@ -163,9 +193,16 @@ public final class WorldMap {
     /** KomplexTexts with the two fields filled in, forty characters wide. */
     public String statusLine() {
         StringBuilder sb = new StringBuilder(" COMPLEX:            STATUS:            ");
-        // ma_CopIt writes eleven characters at offset 9, then eleven more at 28
-        put(sb, 10, NAMES[choice]);
-        put(sb, 29, STATUS_NAMES[statusOf(choice).ordinal()]);
+        // Printnij: ma_CopIt writes eleven characters at offset 9, then eleven more at 28
+        put(sb, 9, NAMES[choice]);
+        put(sb, 28, STATUS_NAMES[statusOf(choice).ordinal()]);
+        return sb.toString();
+    }
+
+    /** ma_NieCen: OKtext with the chosen name at {@code 9+11}. */
+    public String chosenLine() {
+        StringBuilder sb = new StringBuilder(CHOSEN_TEXT);
+        put(sb, 9 + 11, NAMES[choice]);
         return sb.toString();
     }
 

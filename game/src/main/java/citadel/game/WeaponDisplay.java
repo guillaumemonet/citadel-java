@@ -1,6 +1,5 @@
 package citadel.game;
 
-import java.io.File;
 import java.nio.ByteBuffer;
 
 import citadel.core.WeaponChange;
@@ -63,14 +62,16 @@ public final class WeaponDisplay {
             return;
         }
         shown = slot;
-        if (!assets.exists(complex, "item", slot)) {
+        // ci_NewWeapon: weapons show item sprite n, cards past them (cmpi #14,d1 / addi #12,d1)
+        int icon = citadel.core.Inventory.isCard(slot) ? slot + 6 : slot;
+        if (!assets.exists(complex, "item", icon)) {
             if (picture != null) {
                 picture.removeFromParent();
             }
             revealing = false;
             return;
         }
-        if (!load(assets.texturePath(complex, "item", slot))) {
+        if (!load(assets.sprite(complex, "item", icon))) {
             return;
         }
         if (picture == null) {
@@ -131,17 +132,15 @@ public final class WeaponDisplay {
         pixels.put(at + 3, (byte) ((argb >>> 24) & 0xff));
     }
 
-    /** Reads the converted PNG straight off disk, since the reveal needs the pixels. */
-    private boolean load(String path) {
+    /** Takes the decoded pixels, since the reveal works a pixel at a time. */
+    private boolean load(Assets.Sprite img) {
         try {
-            File f = new File(assets.assetRoot(), path);
-            java.awt.image.BufferedImage img = javax.imageio.ImageIO.read(f);
             if (img == null) {
                 return false;
             }
-            width = img.getWidth();
-            height = img.getHeight();
-            sprite = img.getRGB(0, 0, width, height, null, 0, width);
+            width = img.width;
+            height = img.height;
+            sprite = img.argb;
             if (pixels == null || pixels.capacity() != width * height * 4) {
                 // a fresh buffer is already zeroed, so the first weapon fades up out of nothing
                 pixels = BufferUtils.createByteBuffer(width * height * 4);
@@ -156,7 +155,7 @@ public final class WeaponDisplay {
             // ci_DrawWeapon does: it copies sv_ItemBuf into sv_Weapon, it does not clear first
             return true;
         } catch (Exception e) {
-            System.out.println("cannot read " + path + ": " + e);
+            System.out.println("cannot show the weapon: " + e);
             return false;
         }
     }

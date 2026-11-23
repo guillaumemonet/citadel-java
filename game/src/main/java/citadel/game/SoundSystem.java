@@ -1,6 +1,6 @@
 package citadel.game;
 
-import java.io.File;
+import java.nio.ByteBuffer;
 import java.util.List;
 
 import citadel.core.GameState;
@@ -8,13 +8,15 @@ import citadel.core.Level;
 import citadel.core.SoundTable;
 
 import com.jme3.asset.AssetManager;
-import com.jme3.audio.AudioData;
+import com.jme3.audio.AudioBuffer;
+import com.jme3.audio.AudioKey;
 import com.jme3.audio.AudioNode;
+import com.jme3.audio.AudioSource;
 import com.jme3.math.Vector3f;
 import com.jme3.scene.Node;
 
 /**
- * Plays the converted sound effects.
+ * Plays the sound effects, straight out of the sample bank ST.DAT.
  *
  * The rules queue {@link GameState.SoundEvent}s and this drains them once a frame, so nothing in
  * {@code core} has to know about an audio engine.
@@ -31,18 +33,40 @@ public final class SoundSystem {
     private final AssetManager assetManager;
     private final Node root;
     private final AudioNode[] cache = new AudioNode[SoundTable.ALL.length];
-    private final File soundsDir;
+    private final byte[] bank;
     private final boolean available;
 
     public SoundSystem(AssetManager assetManager, Node root, Assets assets) {
         this.assetManager = assetManager;
         this.root = root;
-        this.soundsDir = new File(assets.assetRoot(), "sounds");
-        this.available = soundsDir.isDirectory();
-        if (!available) {
-            System.out.println("no converted sounds found, running silent"
-                    + " (run :tools:convert first)");
+        byte[] b = null;
+        try {
+            b = SoundTable.samples(assets.data().read("GAME/Store/ST.DAT"));
+        } catch (Exception e) {
+            System.out.println("cannot read the sample bank, running silent: " + e.getMessage());
         }
+        this.bank = b;
+        this.available = b != null;
+    }
+
+    /**
+     * One effect as an OpenAL buffer. Paula plays signed 8 bit samples; OpenAL's 8 bit format is
+     * unsigned, hence the flip of the top bit.
+     */
+    private AudioNode load(int index) {
+        SoundTable.Sfx s = SoundTable.ALL[index];
+        if (s.offset + s.length > bank.length) {
+            return null;
+        }
+        ByteBuffer pcm = ByteBuffer.allocateDirect(s.length);
+        for (int i = 0; i < s.length; i++) {
+            pcm.put((byte) (bank[s.offset + i] ^ 0x80));
+        }
+        pcm.flip();
+        AudioBuffer buf = new AudioBuffer();
+        buf.setupFormat(1, 8, s.sampleRate());
+        buf.updateData(pcm);
+        return new AudioNode(buf, new AudioKey(s.name));
     }
 
     /** Plays everything the last update queued. */
@@ -55,6 +79,41 @@ public final class SoundSystem {
         for (GameState.SoundEvent e : events) {
             play(e);
         }
+        serveFireLoop(game.fireLoopVolume());
+    }
+
+    /** The burning enemy's sample, looping on its own voice like Paula channel 2. */
+    private AudioNode fireLoop;
+
+    /**
+     * eh_Burning starts the fire sample looping and me_burning sets its volume every pass from
+     * Sound_Distance2; the owner's death stops it. Paula's volume is linear in 0..64, and so is
+     * the gain here; the distance is already in the volume, so the node is not positional.
+     */
+    private void serveFireLoop(int volume) {
+        if (volume < 0) {
+            if (fireLoop != null && fireLoop.getStatus() == AudioSource.Status.Playing) {
+                fireLoop.stop();
+            }
+            return;
+        }
+        if (fireLoop == null) {
+            try {
+                fireLoop = load(SoundTable.FIRE_LOOP);
+            } catch (RuntimeException ex) {
+                System.out.println("cannot load the fire loop: " + ex.getMessage());
+            }
+            if (fireLoop == null) {
+                return;
+            }
+            fireLoop.setPositional(false);
+            fireLoop.setLooping(true);
+            root.attachChild(fireLoop);
+        }
+        fireLoop.setVolume(volume / 64f);
+        if (fireLoop.getStatus() != AudioSource.Status.Playing) {
+            fireLoop.play();
+        }
     }
 
     private void play(GameState.SoundEvent e) {
@@ -63,14 +122,14 @@ public final class SoundSystem {
         }
         AudioNode node = cache[e.index];
         if (node == null) {
-            String path = "sounds/" + SoundTable.ALL[e.index].name + ".wav";
-            if (!new File(soundsDir, SoundTable.ALL[e.index].name + ".wav").isFile()) {
+            try {
+                node = load(e.index);
+            } catch (RuntimeException ex) {
+                System.out.println("cannot load " + SoundTable.ALL[e.index].name + ": "
+                        + ex.getMessage());
                 return;
             }
-            try {
-                node = new AudioNode(assetManager, path, AudioData.DataType.Buffer);
-            } catch (RuntimeException ex) {
-                System.out.println("cannot load " + path + ": " + ex.getMessage());
+            if (node == null) {
                 return;
             }
             node.setLooping(false);

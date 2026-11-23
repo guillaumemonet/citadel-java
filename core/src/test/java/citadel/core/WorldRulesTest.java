@@ -121,20 +121,18 @@ class WorldRulesTest {
     }
 
     @Test
-    @DisplayName("sv_AddMove replaces the next step under andi #$ff, so a westward shove goes east")
-    void addMoveLosesItsSign() {
+    @DisplayName("sv_AddMove replaces the next step and keeps its sign: a westward shove goes west")
+    void addMoveKeepsItsSign() {
         GameState game = new GameState(new SyntheticMap().level());
         int bx = SyntheticMap.at(30), by = SyntheticMap.at(30);
         game.posX = bx - 600;
         game.posY = by;
         game.angle = 0;
         game.detonate(bx, by, 0, 0);   // westward probes reach him, four times their vector each
-        int x = game.posX, y = game.posY;
-        game.update(1, 0, 0, TICK);    // facing west: on his own he would go 249 west
+        int x = game.posX;
+        game.update(0, 1, 0, TICK);    // strafing: on his own he would not move west at all
         int dx = game.posX - x;
-        assertTrue(dx > 0 && dx <= 255, "the shove replaced the step, eastwards: " + dx);
-        int dy = game.posY - y;
-        assertTrue(dy >= 0 && dy <= 255, "andi #$ff: never south either: " + dy);
+        assertTrue(dx < 0 && dx >= -255, "the shove replaced the step, westwards: " + dx);
         int x2 = game.posX;
         game.update(0, 0, 0, TICK);
         assertEquals(x2, game.posX, "spent in one pass");

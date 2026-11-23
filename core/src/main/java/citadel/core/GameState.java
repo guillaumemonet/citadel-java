@@ -796,9 +796,10 @@ public final class GameState {
      * <li>sv_LastMove takes the length and direction;</li>
      * <li>a rebound (sv_LastMove+4) loses 60 a pass and, while it stays at or above 0, replaces
      *     the move altogether: 250 into a wall comes back as 190, 130, 70 and 10;</li>
-     * <li>sv_LastPos takes the position, and sv_AddMove, when its X word is not zero, replaces
-     *     the move — under {@code andi #$ff}, so each component lands in 0..255 and a negative
-     *     shove goes the wrong way. That is the original's arithmetic and it is kept.</li>
+     * <li>sv_LastPos takes the position, and sv_AddMove, when it is not zero, replaces the move.
+     *     The engine tests only the X word and reads both under {@code andi #$ff}, which throws
+     *     the sign away: a shove west or south lands east or north. The port applies the shove
+     *     the way it was meant, in its own direction, kept to the same 255 units at most.</li>
      * </ul>
      */
     private void doMMove(float forward, float strafe) {
@@ -835,9 +836,11 @@ public final class GameState {
         int[] v = rotate(d0, d1, d6);
         lastPosX = posX;
         lastPosY = posY;
-        if (addMoveX != 0) {
-            v[0] = addMoveX & 0xff;
-            v[1] = addMoveY & 0xff;
+        if (addMoveX != 0 || addMoveY != 0) {
+            // deliberate departure: the engine's andi #$ff would send a negative shove the
+            // wrong way, see the list above
+            v[0] = Math.max(-255, Math.min(255, addMoveX));
+            v[1] = Math.max(-255, Math.min(255, addMoveY));
         }
         int fromX = cellX(), fromY = cellY();
         posX = clampCoord(posX + v[0]);
@@ -859,8 +862,8 @@ public final class GameState {
      * Keeps the player inside the cell the move started in whenever the face crossed is shut.
      *
      * The original has no such test, and mostly needs none: a sober move is at most 250 units
-     * (300 with the potion) against a 307 unit clamp, and sv_AddMove only pushes towards +X and
-     * +Y, at most 255 from a clamp at 717. A drunk one can reach 313, though, which takes a
+     * (300 with the potion) against a 307 unit clamp, and a sv_AddMove shove is at most 255. A
+     * drunk one can reach 313, though, which takes a
      * player clamped against a wall 6 units through it, and sv_Border then clamps them on the
      * far side. The port refuses that crossing.
      */

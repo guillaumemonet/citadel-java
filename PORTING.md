@@ -185,9 +185,10 @@ feel carries over:
   more often as `EXCITE` shortens the stride). The point-blank flamer and bolter (190) and
   launcher (250) recoil through the same field, at `-sv_Angle`.
 - `sv_AddMove` is what a shot (`oc_PlayerHit`, four times its vector) or an enemy walking into you
-  (`me_PLAYER`, a quarter of its step) adds. The next `sv_DoMMove` tests its X word and, if that is
-  not 0, replaces the step with both words `andi #$ff`: every shove lands in 0..255 towards +X and
-  +Y, a negative one going the wrong way. That is the original's arithmetic and the port keeps it.
+  (`me_PLAYER`, a quarter of its step) adds. The next `sv_DoMMove` replaces the step with it.
+  The engine tests only the X word and reads both words under `andi #$ff`, which throws the sign
+  away, so a shove west or south lands east or north. **Deliberate departure:** the port applies
+  the shove in its own direction, at most 255 units on each axis, which is what the code meant.
 - Vodka (`sv_Vodka`, 190 passes a bottle): each pass two random seven-bit signed numbers, -64..63,
   are added to the sideways and length components, the second `asr #3` skews the direction and
   turns the view back by as much. Standing still the drift goes backwards: with no key pressed
@@ -223,8 +224,8 @@ Doors (`br_Chk_OPEN`, `OpenCloseDoors`, `ServePriorDoor`):
 
 One departure from the original, deliberate: a move that crosses into another square through a
 shut face is refused against the square it started in (`blockCrossing`). The original has no such
-test; sober it never needs one (at most 250 or 300 units against a 307 clamp, and `sv_AddMove`
-only pushes towards +X/+Y, at most 255 from a clamp at 717), but a drunk stride of up to 313 takes
+test; sober it never needs one (at most 250 or 300 units against a 307 clamp, and an
+`sv_AddMove` shove at most 255), but a drunk stride of up to 313 takes
 a player clamped against a wall six units through it, and `sv_Border` then clamps him on the far
 side.
 
@@ -933,8 +934,8 @@ the port draws them from a texture one pixel wide stretched across the window.
 `oc_PlayerHit` also turns the player by a random `-8..7`. Both events push the player as well:
 `br_BumpWall` writes a rebound into `sv_LastMove+4/+6`, and `oc_PlayerHit` adds four times the
 shot's velocity to `sv_AddMove` - which `sv_DoRotIt` reads back under `andi #$ff`, destroying the
-sign and sending a negative push the wrong way. Both are ported as the engine has them, see
-**Movement rules**.
+sign and sending a negative push the wrong way. The rebound is ported as the engine has it; the
+shove keeps its direction in the port, see **Movement rules**.
 
 ## The teleport dissolve
 

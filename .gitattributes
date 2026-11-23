@@ -1,0 +1,6 @@
+# Keep the repository in LF whatever the editor or the platform writes.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.adf binary

@@ -1,5 +1,7 @@
 # Citadel — Java / jMonkeyEngine port
 
+*[Version française](README_fr.md)*
+
 A port of the 1995 Amiga first-person shooter **Citadel** by Virtual Design, rebuilt in Java on
 [jMonkeyEngine](https://jmonkeyengine.org/). Every rule, table and data format comes from the
 original 68000 assembly rather than being reinvented; only the renderer is new.
@@ -225,46 +227,3 @@ The engine is provided for compatibility, preservation, and educational purposes
 Citadel is Copyright © 1995, 2022 Virtual Design. Original code by Kane of Suspect. Java and jMonkeyEngine port by **Guillaume Monet**.
 
 This package is free to copy and use for non-commercial purposes under the terms of the **GNU GPL-3.0** licence; see [LICENSE](LICENSE). It comes with absolutely no warranty of any kind.
-
-<details>
-<summary>Version française</summary>
-
-### Mentions légales et données du jeu
-
-#### Implémentation indépendante du moteur
-
-Ce projet est une réimplémentation indépendante du moteur de *Citadel*, conçue pour reproduire le comportement du jeu d'origine sur les plateformes modernes.
-
-Le moteur a été développé à partir du code source d'origine, publié par Virtual Design sous licence GNU GPL-3.0 ([pawelmat/Amiga-Citadel](https://github.com/pawelmat/Amiga-Citadel)), par analyse technique et tests de compatibilité. Ce code source n'est pas inclus dans ce dépôt.
-
-#### Fichiers du jeu d'origine
-
-Ce projet nécessite des fichiers du jeu d'origine, comme les cinq disquettes du jeu (images ADF), pour fonctionner.
-
-**Les fichiers du jeu d'origine ne sont pas inclus dans ce projet.**
-
-Chaque utilisateur doit se procurer et fournir ses propres fichiers de jeu auprès d'une source légalement autorisée. Avant de télécharger ou d'utiliser ce moteur, l'utilisateur doit confirmer qu'il possède une copie du jeu d'origine obtenue légalement.
-
-Au premier lancement, le jeu propose de télécharger les cinq disquettes (une archive d'environ 4 Mo sur amiga500archive.com) ou d'indiquer un dossier qui les contient.
-
-Eloane Studio n'héberge, ne distribue ni ne fournit de copies non autorisées de données de jeu protégées par le droit d'auteur.
-
-#### Droits d'auteur et marques
-
-Les noms, marques, graphismes, musiques et autres éléments propriétaires de *Citadel* restent la propriété de leurs titulaires respectifs (Virtual Design).
-
-Ce projet est une implémentation indépendante et non officielle ; il n'est ni affilié, ni approuvé, ni soutenu par les développeurs ou les éditeurs du jeu d'origine.
-
-#### Préservation
-
-Ce projet a pour but de préserver le comportement technique et l'expérience de jeu des jeux vidéo classiques, tout en les rendant accessibles sur les systèmes modernes.
-
-Le moteur est fourni à des fins de compatibilité, de préservation et d'éducation.
-
-#### Crédits et licence
-
-Citadel est Copyright © 1995, 2022 Virtual Design. Code d'origine de Kane of Suspect. Portage Java et jMonkeyEngine : **Guillaume Monet**.
-
-Ce paquet peut être copié et utilisé librement à des fins non commerciales, selon les termes de la licence **GNU GPL-3.0** ; voir [LICENSE](LICENSE). Il est fourni sans aucune garantie.
-
-</details>
